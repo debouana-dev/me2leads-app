@@ -10,6 +10,7 @@ import '../../models/contact.dart';
 import '../../providers/contacts_provider.dart';
 import '../../providers/organization_provider.dart';
 import '../../services/contact_actions.dart';
+import '../../services/photo_storage_service.dart';
 
 class ContactsScreen extends ConsumerWidget {
   const ContactsScreen({super.key});
@@ -226,7 +227,7 @@ class ContactsScreen extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(14),
                 image: contact.photoPath != null && !kIsWeb
                     ? DecorationImage(
-                        image: FileImage(File(contact.photoPath!)),
+                        image: FileImage(File(PhotoStorageService.resolveAbsolutePath(contact.photoPath)!)),
                         fit: BoxFit.cover,
                       )
                     : null,

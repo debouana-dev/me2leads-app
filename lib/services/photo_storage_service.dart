@@ -14,18 +14,21 @@ class PhotoFileTooLargeException implements Exception {
 
 /// Manages persistent photo storage for profile and contact images.
 ///
-/// Photos are copied into the app's private documents directory under a
-/// hidden `.images/` folder so they survive app updates and are not
-/// visible in the system gallery. Images are organized per user:
-///   - `.images/profile_pictures/<email>/`  — user profile photos
-///   - `.images/contact_pictures/<email>/`  — contact photos
+/// ## Path format
+/// Stored paths are **relative** to the app's documents directory so they are
+/// the same on every platform (Android, iOS).  The relative portion is:
 ///
-/// Every image is stored under a random 10-character alphanumeric name
-/// with a `.jpg` extension regardless of the original format. Files
-/// larger than 5 MB throw [PhotoFileTooLargeException] before any I/O.
+///   profile_pictures/<userId>/<random10chars>.jpg
+///   contact_pictures/<userId>/<random10chars>.jpg
 ///
-/// All other errors fall back to the original [sourcePath] so callers
-/// never have to handle a null path in the happy path.
+/// Locally, files live at `<docsDir>/.images/<relativePath>`.
+/// On the FTP server, files are stored at `photos/<relativePath>`.
+///
+/// ## Backward compatibility
+/// Old records may carry an absolute path (starts with `/`).
+/// [resolveAbsolutePath] detects these and returns them unchanged so existing
+/// photos continue to display on the same device.  They are migrated to
+/// relative paths the next time the user runs a full sync push.
 class PhotoStorageService {
   PhotoStorageService._();
 
@@ -33,35 +36,69 @@ class PhotoStorageService {
   static const String _chars =
       'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
+  /// Cached absolute path to `getApplicationDocumentsDirectory()`.
+  /// Populated once by [init]; must be called before any resolution.
+  static String? _docsDir;
+
+  // ── Initialisation ───────────────────────────────────────────────────────
+
+  /// Caches the platform documents directory.  Call once in
+  /// [StorageService.init] before the app renders any photo widget.
+  static Future<void> init() async {
+    if (kIsWeb) return;
+    final dir = await getApplicationDocumentsDirectory();
+    _docsDir = dir.path;
+  }
+
   // ── Public API ──────────────────────────────────────────────────────────
 
-  /// Copies [sourcePath] into `.images/profile_pictures/<email>/`.
+  /// Copies [sourcePath] into `.images/profile_pictures/<userId>/`.
   ///
-  /// Returns the new persistent path, or [sourcePath] if the copy fails.
-  /// Returns [sourcePath] unchanged on web (file I/O not available).
+  /// Returns the **relative** path on success, or null on failure.
   /// Throws [PhotoFileTooLargeException] if the file exceeds 5 MB.
+  /// No-op on web (returns null).
   static Future<String?> saveProfilePhoto(String sourcePath) async {
-    if (kIsWeb) return sourcePath;
-    return _copyToDir(sourcePath, p.join('profile_pictures', _ownerFolder));
+    if (kIsWeb) return null;
+    return _copyToDir(sourcePath, 'profile_pictures');
   }
 
-  /// Copies [sourcePath] into `.images/contact_pictures/<email>/`.
+  /// Copies [sourcePath] into `.images/contact_pictures/<userId>/`.
   ///
-  /// Returns the new persistent path, or [sourcePath] if the copy fails.
-  /// Returns [sourcePath] unchanged on web.
+  /// Returns the **relative** path on success, or null on failure.
   /// Throws [PhotoFileTooLargeException] if the file exceeds 5 MB.
+  /// No-op on web (returns null).
   static Future<String?> saveContactPhoto(String sourcePath) async {
-    if (kIsWeb) return sourcePath;
-    return _copyToDir(sourcePath, p.join('contact_pictures', _ownerFolder));
+    if (kIsWeb) return null;
+    return _copyToDir(sourcePath, 'contact_pictures');
   }
 
-  // ── Internal ────────────────────────────────────────────────────────────
+  /// Resolves a stored path (relative or legacy absolute) to an absolute
+  /// filesystem path suitable for use with [File] / [FileImage].
+  ///
+  /// - Returns null when [path] is null or empty.
+  /// - Returns [path] unchanged if it is already absolute (legacy records).
+  /// - Prepends `<docsDir>/.images/` for new relative paths.
+  static String? resolveAbsolutePath(String? path) {
+    if (path == null || path.isEmpty) return null;
+    // Legacy absolute path — leave untouched for backward compat.
+    if (path.startsWith('/') || path.contains(':\\')) return path;
+    final dir = _docsDir;
+    if (dir == null) return null;
+    return p.join(dir, '.images', path);
+  }
 
-  /// Returns the current user's email to use as the per-user folder name.
-  /// Falls back to `_default` when no session is active.
+  /// Returns the local [File] for a relative [path], or null when the path
+  /// cannot be resolved (e.g. before [init] was called or on web).
+  static File? localFileForRelativePath(String? path) {
+    final resolved = resolveAbsolutePath(path);
+    return resolved != null ? File(resolved) : null;
+  }
+
+  // ── Internals ────────────────────────────────────────────────────────────
+
   static String get _ownerFolder {
-    final email = StorageService.userEmail;
-    return email.isEmpty ? '_default' : email;
+    final userId = StorageService.currentUserId;
+    return userId.isEmpty ? '_default' : userId;
   }
 
   static String _randomName() {
@@ -69,28 +106,31 @@ class PhotoStorageService {
     return List.generate(10, (_) => _chars[rng.nextInt(_chars.length)]).join();
   }
 
-  static Future<String?> _copyToDir(
-      String sourcePath, String subDir) async {
+  /// Copies [sourcePath] into `.images/<subDir>/<userId>/` and returns the
+  /// **relative** path `<subDir>/<userId>/<filename>.jpg`.
+  static Future<String?> _copyToDir(String sourcePath, String subDir) async {
     try {
       final source = File(sourcePath);
       final size = await source.length();
       if (size > _maxBytes) throw const PhotoFileTooLargeException();
 
       final appDir = await getApplicationDocumentsDirectory();
-      final targetDir =
-          Directory(p.join(appDir.path, '.images', subDir));
-      if (!await targetDir.exists()) {
-        await targetDir.create(recursive: true);
+      // Cache the docs dir if not done yet (e.g. very early call).
+      _docsDir ??= appDir.path;
+
+      final owner = _ownerFolder;
+      final relativePath = p.join(subDir, owner, '${_randomName()}.jpg');
+      final targetFile = File(p.join(appDir.path, '.images', relativePath));
+
+      if (!await targetFile.parent.exists()) {
+        await targetFile.parent.create(recursive: true);
       }
-      final targetPath = p.join(targetDir.path, '${_randomName()}.jpg');
-      await source.copy(targetPath);
-      return targetPath;
+      await source.copy(targetFile.path);
+      return relativePath;
     } on PhotoFileTooLargeException {
       rethrow;
     } catch (_) {
-      // If anything goes wrong (permissions, disk full, etc.) fall back
-      // to the original path so the photo still displays.
-      return sourcePath;
+      return null;
     }
   }
 }

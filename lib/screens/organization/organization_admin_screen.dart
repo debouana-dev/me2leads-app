@@ -11,6 +11,7 @@ import '../../core/l10n/app_l10n.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/organization.dart';
 import '../../providers/organization_provider.dart';
+import '../../services/photo_storage_service.dart';
 import '../../services/storage_service.dart';
 
 class OrganizationAdminScreen extends ConsumerStatefulWidget {
@@ -747,7 +748,7 @@ class _MemberCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                     image: member.photoPath != null && !kIsWeb
                         ? DecorationImage(
-                            image: FileImage(File(member.photoPath!)),
+                            image: FileImage(File(PhotoStorageService.resolveAbsolutePath(member.photoPath)!)),
                             fit: BoxFit.cover,
                           )
                         : null,

@@ -6,6 +6,7 @@ import '../models/reminder.dart';
 import '../models/user_account.dart';
 import 'database_service.dart';
 import 'encryption_service.dart';
+import 'photo_storage_service.dart';
 
 /// High-level storage facade combining secure key/value storage for
 /// session/preferences and the encrypted SQLite database for entities.
@@ -25,6 +26,8 @@ class StorageService {
 
   static Future<void> init() async {
     await EncryptionService.init();
+    // Cache the platform documents directory for cross-platform photo paths.
+    await PhotoStorageService.init();
     // Open the database eagerly so the first query is fast.
     await DatabaseService.database;
 

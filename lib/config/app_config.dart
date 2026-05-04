@@ -51,6 +51,23 @@ class AppConfig {
         32, 28, 126, 9, 4, 5, 23, 65,
       ]);
 
+  // ── FTP photo storage ───────────────────────────────────────────────────
+
+  static String get ftpHost => _deobfuscate(const [
+        43, 13, 44, 91, 2, 8, 6, 81, 68, 87, 84, 98, 85, 83, 92, 13,
+        27, 56, 17, 16, 35, 30, 98, 10, 23, 12, 93, 92, 85, 70,
+      ]);
+
+  static int get ftpPort => 21;
+
+  static String get ftpUsername => _deobfuscate(const [
+        39, 26, 39, 4, 15, 28, 0, 31, 93, 87, 4, 63, 0, 2, 22, 22,
+      ]);
+
+  static String get ftpPassword => _deobfuscate(const [
+        41, 77, 53, 4, 35, 51, 57, 2, 17, 94, 98, 17,
+      ]);
+
   // ── Internal ────────────────────────────────────────────────────────────
 
   /// XOR deobfuscation. Key cycles over [data] by index modulo key length.

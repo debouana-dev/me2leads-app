@@ -1553,6 +1553,31 @@ class DatabaseService {
     await db.insert(table, row, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  /// Updates only the photo_path column for a user row.
+  /// Used during sync migration from absolute to relative paths.
+  static Future<void> updateUserPhotoPath(String userId, String? path) async {
+    final db = await database;
+    await db.update(
+      'users',
+      {'photo_path': path},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+
+  /// Updates only the photo_path column for a contact row.
+  /// Used during sync migration from absolute to relative paths.
+  static Future<void> updateContactPhotoPath(
+      String contactId, String? path) async {
+    final db = await database;
+    await db.update(
+      'contacts',
+      {'photo_path': path},
+      where: 'id = ?',
+      whereArgs: [contactId],
+    );
+  }
+
   /// Persists the timestamp of the most recent successful sync for [userId].
   static Future<void> updateUserLastSync(String userId, String isoTimestamp) async {
     final db = await database;

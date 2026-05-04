@@ -120,7 +120,7 @@ class ProfileScreen extends ConsumerWidget {
                             ),
                             image: auth.userPhotoPath != null && !kIsWeb
                                 ? DecorationImage(
-                                    image: FileImage(File(auth.userPhotoPath!)),
+                                    image: FileImage(File(PhotoStorageService.resolveAbsolutePath(auth.userPhotoPath)!)),
                                     fit: BoxFit.cover,
                                   )
                                 : null,

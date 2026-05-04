@@ -294,7 +294,7 @@ class _ContactEditScreenState extends ConsumerState<ContactEditScreen> {
                                   borderRadius: BorderRadius.circular(24),
                                   image: _photoPath != null
                                       ? DecorationImage(
-                                          image: FileImage(File(_photoPath!)),
+                                          image: FileImage(File(PhotoStorageService.resolveAbsolutePath(_photoPath)!)),
                                           fit: BoxFit.cover,
                                         )
                                       : null,

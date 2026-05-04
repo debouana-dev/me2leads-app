@@ -14,6 +14,7 @@ import '../models/user_account.dart';
 import '../services/database_service.dart';
 import '../services/email_service.dart';
 import '../services/encryption_service.dart';
+import '../services/photo_storage_service.dart';
 import '../services/storage_service.dart';
 
 const _uuid = Uuid();
@@ -432,7 +433,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
   static void _deleteFileIfExists(String? path) {
     if (path == null || path.isEmpty) return;
     try {
-      final file = File(path);
+      final resolved = PhotoStorageService.resolveAbsolutePath(path);
+      if (resolved == null) return;
+      final file = File(resolved);
       if (file.existsSync()) file.deleteSync();
     } catch (_) {}
   }

@@ -14,6 +14,7 @@ import '../../providers/contacts_provider.dart';
 import '../../providers/navigation_provider.dart';
 import '../../providers/notifications_provider.dart';
 import '../../providers/reminders_provider.dart';
+import '../../services/photo_storage_service.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -662,7 +663,7 @@ class _HotLeadCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
                 image: contact.photoPath != null && !kIsWeb
                     ? DecorationImage(
-                        image: FileImage(File(contact.photoPath!)),
+                        image: FileImage(File(PhotoStorageService.resolveAbsolutePath(contact.photoPath)!)),
                         fit: BoxFit.cover,
                       )
                     : null,

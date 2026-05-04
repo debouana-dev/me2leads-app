@@ -82,6 +82,9 @@ dependencies:
   # Remote database sync
   mysql_client: ^0.0.27
 
+  # FTP photo sync
+  ftpconnect: ^2.0.10
+
   # HTTP
   http: ^1.2.0
 

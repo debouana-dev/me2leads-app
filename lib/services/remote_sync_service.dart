@@ -1,9 +1,14 @@
+import 'dart:io';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mysql_client/mysql_client.dart';
+import 'package:path/path.dart' as p;
 
 import '../config/app_config.dart';
 import 'database_service.dart';
+import 'ftp_photo_service.dart';
+import 'photo_storage_service.dart';
 
 /// Result of a push or pull sync operation.
 class SyncResult {
@@ -295,6 +300,11 @@ class RemoteSyncService {
       return SyncResult.err('no_connection');
     }
 
+    // Migrate old absolute photo paths → relative, then upload to FTP.
+    // Must run before the MySQL upserts so the remote DB receives
+    // platform-neutral relative paths.
+    await _migrateAndUploadPhotos(userId);
+
     final conn = await _connect();
     if (conn == null) return SyncResult.err('auth_failed');
 
@@ -502,6 +512,9 @@ class RemoteSyncService {
               _normaliseBools(_rowToMap(row, memRes.cols), _memberBoolCols));
         }
       }
+
+      // Download any photos that are referenced in the DB but missing locally.
+      await _downloadMissingPhotos(userId, pullOwnerIds);
 
       final now = DateTime.now().toIso8601String();
       await DatabaseService.updateUserLastSync(userId, now);
@@ -774,4 +787,108 @@ class RemoteSyncService {
             : e.value,
     };
   }
+
+  // ── Photo sync helpers ──────────────────────────────────────────────────────
+
+  /// Migrates old absolute photo paths to relative paths in the local DB,
+  /// then uploads every photo that has a relative path to FTP.
+  ///
+  /// Must be called before the MySQL upsert step in [push] so the remote DB
+  /// always receives platform-neutral relative paths.
+  static Future<void> _migrateAndUploadPhotos(String userId) async {
+    try {
+      // User profile photo
+      final userRow = await DatabaseService.getRawUserRow(userId);
+      if (userRow != null) {
+        final oldPath = userRow['photo_path'] as String?;
+        final newPath =
+            await _migratePhotoPath(oldPath, 'profile_pictures', userId);
+        if (newPath != oldPath) {
+          await DatabaseService.updateUserPhotoPath(userId, newPath);
+        }
+        if (newPath != null && !_isAbsolutePath(newPath)) {
+          await FtpPhotoService.uploadPhoto(newPath);
+        }
+      }
+
+      // Contact photos
+      final contacts = await DatabaseService.getRawContactRows(userId);
+      for (final row in contacts) {
+        final contactId = row['id'] as String;
+        final oldPath = row['photo_path'] as String?;
+        final newPath =
+            await _migratePhotoPath(oldPath, 'contact_pictures', userId);
+        if (newPath != oldPath) {
+          await DatabaseService.updateContactPhotoPath(contactId, newPath);
+        }
+        if (newPath != null && !_isAbsolutePath(newPath)) {
+          await FtpPhotoService.uploadPhoto(newPath);
+        }
+      }
+    } catch (e) {
+      debugPrint('RemoteSyncService photo migration error: $e');
+    }
+  }
+
+  /// Downloads photos from FTP for all records that have a relative photo_path
+  /// but no local file.  Called at the end of [pull] after DB records are saved.
+  static Future<void> _downloadMissingPhotos(
+      String userId, List<String> ownerIds) async {
+    try {
+      // User profile photo
+      final userRow = await DatabaseService.getRawUserRow(userId);
+      if (userRow != null) {
+        await _downloadPhotoIfMissing(userRow['photo_path'] as String?);
+      }
+
+      // Contact photos for every relevant owner
+      for (final ownerId in ownerIds) {
+        final contacts = await DatabaseService.getRawContactRows(ownerId);
+        for (final row in contacts) {
+          await _downloadPhotoIfMissing(row['photo_path'] as String?);
+        }
+      }
+    } catch (e) {
+      debugPrint('RemoteSyncService photo download error: $e');
+    }
+  }
+
+  /// Converts an old absolute [path] to a platform-neutral relative path.
+  ///
+  /// - `null` or empty  → `null` (no photo)
+  /// - Already relative → returned unchanged
+  /// - Absolute, file exists → new relative path (file copied to new location)
+  /// - Absolute, file gone   → `null` (clears the stale reference)
+  static Future<String?> _migratePhotoPath(
+      String? path, String subDir, String userId) async {
+    if (path == null || path.isEmpty) return null;
+    if (!_isAbsolutePath(path)) return path; // already relative
+
+    final file = File(path);
+    if (!await file.exists()) return null;
+
+    final filename = p.basename(path);
+    final relativePath = '$subDir/$userId/$filename';
+
+    final newFile = PhotoStorageService.localFileForRelativePath(relativePath);
+    if (newFile != null && !await newFile.exists()) {
+      await newFile.parent.create(recursive: true);
+      await file.copy(newFile.path);
+    }
+    return relativePath;
+  }
+
+  /// Downloads a photo from FTP when its local file does not yet exist.
+  /// Silently skips absolute paths (old records never uploaded to FTP).
+  static Future<void> _downloadPhotoIfMissing(String? path) async {
+    if (path == null || path.isEmpty || _isAbsolutePath(path)) return;
+    final localFile = PhotoStorageService.localFileForRelativePath(path);
+    if (localFile == null || await localFile.exists()) return;
+    await FtpPhotoService.downloadPhoto(path);
+  }
+
+  /// Returns true for old-style absolute paths (start with `/` on Unix-like
+  /// platforms, or contain a Windows drive letter followed by `:`).
+  static bool _isAbsolutePath(String path) =>
+      path.startsWith('/') || path.contains(':\\');
 }

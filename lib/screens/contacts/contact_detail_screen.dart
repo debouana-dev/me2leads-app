@@ -14,6 +14,7 @@ import '../../models/reminder.dart';
 import '../../providers/contacts_provider.dart';
 import '../../providers/organization_provider.dart';
 import '../../services/contact_actions.dart';
+import '../../services/photo_storage_service.dart';
 import '../../services/storage_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../providers/reminders_provider.dart';
@@ -152,7 +153,7 @@ class _ContactDetailScreenState extends ConsumerState<ContactDetailScreen> {
                       ),
                       image: contact.photoPath != null && !kIsWeb
                           ? DecorationImage(
-                              image: FileImage(File(contact.photoPath!)),
+                              image: FileImage(File(PhotoStorageService.resolveAbsolutePath(contact.photoPath)!)),
                               fit: BoxFit.cover,
                             )
                           : null,
