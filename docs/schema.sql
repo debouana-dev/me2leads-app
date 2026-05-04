@@ -1,5 +1,5 @@
 -- ============================================================
--- myleads  —  Database schema v10
+-- myleads  —  Database schema v11
 -- MySQL 8.0+  ·  InnoDB  ·  utf8mb4_unicode_ci
 -- Derived from lib/services/database_service.dart
 --
@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `organization_id`      VARCHAR(36)   DEFAULT NULL    COMMENT 'FK to organizations.id (nullable)',
   `org_role`             VARCHAR(20)   DEFAULT NULL    COMMENT 'admin | member | NULL',
   `plan`                 VARCHAR(20)   NOT NULL DEFAULT 'free' COMMENT 'free | premium | business',
+  `last_sync_at`         DATETIME      DEFAULT NULL            COMMENT 'ISO-8601 timestamp of last successful MySQL sync (v11)',
 
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_users_email_lookup` (`email_lookup`),
@@ -207,14 +208,15 @@ CREATE TABLE IF NOT EXISTS `notifications` (
 
 -- ============================================================
 -- ORGANIZATIONS  (v7)
--- invite_code is the 6-char uppercase join code shown in the UI.
+-- invite_code is the 8-char alphanumeric join code shown in the UI.
+-- Characters drawn from [A-Z2-9] (no 0/O/1/I ambiguity).
 -- owner_id is not enforced as a FK to allow flexible delete order.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS `organizations` (
   `id`           VARCHAR(36)   NOT NULL,
   `name`         VARCHAR(255)  NOT NULL,
   `owner_id`     VARCHAR(36)   NOT NULL COMMENT 'references users.id; not FK-enforced',
-  `invite_code`  CHAR(6)       NOT NULL,
+  `invite_code`  CHAR(8)       NOT NULL,
   `created_at`   DATETIME      NOT NULL,
 
   PRIMARY KEY (`id`),
@@ -251,3 +253,51 @@ CREATE TABLE IF NOT EXISTS `organization_members` (
 
 
 SET foreign_key_checks = 1;
+
+
+-- ============================================================
+-- INCREMENTAL MIGRATIONS  (run against an existing database)
+-- Each block is idempotent: safe to re-run on a DB that already
+-- has the column / index.  Apply in version order.
+-- ============================================================
+
+-- v8: per-member access privileges
+ALTER TABLE `organization_members`
+  ADD COLUMN IF NOT EXISTS `can_edit`   TINYINT(1) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS `can_create` TINYINT(1) NOT NULL DEFAULT 1;
+UPDATE `organization_members` SET `can_edit` = 1, `can_create` = 1 WHERE `role` = 'admin';
+
+-- v9: subscription plan
+ALTER TABLE `users`
+  ADD COLUMN IF NOT EXISTS `plan` VARCHAR(20) NOT NULL DEFAULT 'free'
+    COMMENT 'free | premium | business';
+
+-- v10: per-member reminder-view privilege
+ALTER TABLE `organization_members`
+  ADD COLUMN IF NOT EXISTS `can_view_reminders` TINYINT(1) NOT NULL DEFAULT 0;
+UPDATE `organization_members` SET `can_view_reminders` = 1 WHERE `role` = 'admin';
+
+-- v11: per-user last-sync timestamp
+ALTER TABLE `users`
+  ADD COLUMN IF NOT EXISTS `last_sync_at` DATETIME DEFAULT NULL
+    COMMENT 'Timestamp of last successful MySQL sync for this user';
+
+-- Widen invite_code from CHAR(6) to CHAR(8) to match the app generator.
+-- (Previously documented as 6-char; the app has always generated 8 chars.)
+ALTER TABLE `organizations`
+  MODIFY COLUMN `invite_code` CHAR(8) NOT NULL;
+
+
+-- ============================================================
+-- Schema version history
+-- ============================================================
+-- v1–4  : Original contacts / reminders / users schema
+-- v5    : Multi-contact reminders + scheduling columns
+-- v6    : In-app notifications table
+-- v7    : organizations + organization_members tables; org columns on users
+-- v8    : Per-member can_edit / can_create privilege columns
+-- v9    : users.plan subscription tier column
+-- v10   : organization_members.can_view_reminders privilege column
+-- v11   : users.last_sync_at — per-user timestamp of last successful sync
+--         + correct invite_code width to CHAR(8)
+-- ============================================================

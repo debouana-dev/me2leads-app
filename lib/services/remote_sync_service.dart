@@ -119,6 +119,7 @@ class RemoteSyncService {
         `organization_id`     VARCHAR(36),
         `org_role`            VARCHAR(20),
         `plan`                VARCHAR(20)  NOT NULL DEFAULT 'free',
+        `last_sync_at`        VARCHAR(50),
         PRIMARY KEY (`id`),
         UNIQUE KEY `uq_users_email_lookup` (`email_lookup`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -196,7 +197,7 @@ class RemoteSyncService {
         `id`          VARCHAR(36)  NOT NULL,
         `name`        VARCHAR(255) NOT NULL,
         `owner_id`    VARCHAR(36)  NOT NULL,
-        `invite_code` CHAR(6)      NOT NULL,
+        `invite_code` CHAR(8)      NOT NULL,
         `created_at`  VARCHAR(50)  NOT NULL,
         PRIMARY KEY (`id`),
         UNIQUE KEY `uq_org_invite_code` (`invite_code`)
@@ -543,20 +544,21 @@ class RemoteSyncService {
          phone_enc,phone_lookup,date_of_birth_enc,company_name_enc,company_role_enc,
          biography_enc,password_hash,auth_provider,session_token,created_at,
          last_login_at,password_changed_at,photo_path,email_verified,
-         organization_id,org_role,plan)
+         organization_id,org_role,plan,last_sync_at)
       VALUES
         (:id,:email_enc,:email_lookup,:first_name_enc,:last_name_enc,:nickname_enc,
          :phone_enc,:phone_lookup,:date_of_birth_enc,:company_name_enc,:company_role_enc,
          :biography_enc,:password_hash,:auth_provider,:session_token,:created_at,
          :last_login_at,:password_changed_at,:photo_path,:email_verified,
-         :organization_id,:org_role,:plan)
+         :organization_id,:org_role,:plan,:last_sync_at)
       ON DUPLICATE KEY UPDATE
         email_enc=VALUES(email_enc),first_name_enc=VALUES(first_name_enc),
         last_name_enc=VALUES(last_name_enc),nickname_enc=VALUES(nickname_enc),
         phone_enc=VALUES(phone_enc),company_name_enc=VALUES(company_name_enc),
         company_role_enc=VALUES(company_role_enc),biography_enc=VALUES(biography_enc),
         photo_path=VALUES(photo_path),plan=VALUES(plan),
-        organization_id=VALUES(organization_id),org_role=VALUES(org_role)
+        organization_id=VALUES(organization_id),org_role=VALUES(org_role),
+        last_sync_at=VALUES(last_sync_at)
     ''', {
       'id': r['id'],
       'email_enc': r['email_enc'],
@@ -581,6 +583,7 @@ class RemoteSyncService {
       'organization_id': r['organization_id'],
       'org_role': r['org_role'],
       'plan': r['plan'] ?? 'free',
+      'last_sync_at': r['last_sync_at'],
     });
   }
 
