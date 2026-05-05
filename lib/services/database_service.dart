@@ -424,6 +424,31 @@ class DatabaseService {
     _onRemoteUpsert?.call('users', row);
   }
 
+  /// Updates only the session-related columns (session_token, last_login_at)
+  /// without touching any AES-encrypted profile fields or firing the remote
+  /// sync callback.
+  ///
+  /// Use this when a user's account has just been imported from the cloud
+  /// database onto a new device. The cloud row was encrypted with a different
+  /// device's AES key, so passing a [UserAccount] through [updateUser] would
+  /// re-encrypt empty/garbled values and push them back to the cloud via the
+  /// live-write callback, erasing the correct profile data.
+  static Future<void> updateUserSessionToken(
+      String userId, String token, DateTime lastLoginAt) async {
+    final db = await database;
+    await db.update(
+      'users',
+      {
+        'session_token': token,
+        'last_login_at': lastLoginAt.toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+    // No _onRemoteUpsert call: the cloud already holds correct profile data.
+    // startUserSync will push the full raw row via getRawUserRow when needed.
+  }
+
   /// Invalidate all sessions for a user (used when password changes).
   /// Sets a fresh session token; older clients holding the previous token
   /// will fail [validateSessionToken] and be forced to re-login.

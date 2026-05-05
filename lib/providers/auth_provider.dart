@@ -147,7 +147,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
       sessionToken: token,
       lastLoginAt: DateTime.now(),
     );
-    await DatabaseService.updateUser(updated);
+
+    if (importedFromCloud) {
+      // The profile fields in the local SQLite row are encrypted with another
+      // device's AES key. Calling updateUser would re-encrypt empty/garbled
+      // decrypted values and push them back to the cloud via the live-write
+      // callback, erasing the correct profile data.
+      // Only update session-specific columns — the cloud data stays intact.
+      await DatabaseService.updateUserSessionToken(
+          user.id, token, DateTime.now());
+    } else {
+      await DatabaseService.updateUser(updated);
+    }
     await StorageService.setCurrentSession(updated, token);
 
     state = state.copyWith(

@@ -708,8 +708,19 @@ class RemoteSyncService {
         {'id': userId},
       );
       for (final row in userResult.rows) {
-        await DatabaseService.upsertRawRow(
-            'users', _normaliseBools(_rowToMap(row, userResult.cols), _userBoolCols));
+        final cloudRow =
+            _normaliseBools(_rowToMap(row, userResult.cols), _userBoolCols);
+        // Preserve the device-local session_token and password_hash.
+        // The cloud row was written by a different device and carries that
+        // device's token; overwriting the local token would invalidate the
+        // current session on the next app restart (StorageService.init
+        // compares the secure-storage token with the DB value).
+        final localRow = await DatabaseService.getRawUserRow(userId);
+        if (localRow != null) {
+          cloudRow['session_token'] = localRow['session_token'];
+          cloudRow['password_hash'] = localRow['password_hash'];
+        }
+        await DatabaseService.upsertRawRow('users', cloudRow);
       }
 
       // Data-table pull is restricted to premium / business plans.
