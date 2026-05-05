@@ -629,6 +629,25 @@ class RemoteSyncService {
     }
   }
 
+  /// Sets `email_verified = 1` for [userId] in the remote database.
+  /// The live-write background callback excludes this field from its UPDATE
+  /// clause, so an explicit call is required after email verification.
+  static Future<void> updateEmailVerifiedInCloud(String userId) async {
+    if (kIsWeb) return;
+    final conn = await _connect();
+    if (conn == null) return;
+    try {
+      await conn.execute(
+        'UPDATE `users` SET `email_verified` = 1 WHERE `id` = :id',
+        {'id': userId},
+      );
+    } catch (e) {
+      debugPrint('RemoteSyncService updateEmailVerifiedInCloud error: $e');
+    } finally {
+      await conn.close();
+    }
+  }
+
   /// Updates only the email-related columns for [userId] in the remote
   /// database. The background live-write callback updates `email_enc` but
   /// intentionally skips `email_lookup`, so a stale lookup hash would break

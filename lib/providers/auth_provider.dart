@@ -839,6 +839,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final updated = user.copyWith(emailVerified: true);
       await DatabaseService.updateUser(updated);
 
+      // Sync email_verified to cloud — this field is excluded from the
+      // live-write ON DUPLICATE KEY UPDATE clause, so an explicit call is needed.
+      unawaited(RemoteSyncService.updateEmailVerifiedInCloud(user.id));
+
       // If this is the currently logged-in user, refresh the session.
       final current = StorageService.currentUser;
       if (current != null && current.id == user.id) {
