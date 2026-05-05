@@ -459,6 +459,7 @@ class AppL10n {
   String get freePlanTagline =>
       _en ? 'Discover Me2Leads' : 'Découvrir Me2Leads';
   String get upgradeNow => _en ? 'Upgrade now' : 'Améliorer maintenant';
+  String get managePlan => _en ? 'Manage plan' : 'Gérer le forfait';
   String get subscriptionPlanOption =>
       _en ? 'Subscription Plan' : "Plan d'abonnement";
   String get subscriptionPlanOptionDesc =>

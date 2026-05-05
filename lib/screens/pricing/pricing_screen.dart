@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/l10n/app_l10n.dart';
 import '../../core/theme/app_colors.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
 import '../../providers/settings_provider.dart';
 
@@ -15,6 +16,19 @@ class PricingScreen extends ConsumerWidget {
     final l10n = ref.watch(l10nProvider);
     final currency = ref.watch(settingsProvider).currency;
     final eurToUsd = ref.watch(eurToUsdRateProvider);
+    final plan = ref.watch(authProvider).plan;
+
+    final planName = switch (plan) {
+      'premium' => l10n.premiumPlanName,
+      'business' => l10n.businessPlanName,
+      _ => l10n.freePlanName,
+    };
+    final planTagline = switch (plan) {
+      'premium' => l10n.premiumPlanDesc,
+      'business' => l10n.businessPlanDesc,
+      _ => l10n.freePlanTagline,
+    };
+    final isPaid = plan == 'premium' || plan == 'business';
 
     return Scaffold(
       backgroundColor: AppColors.bg(context),
@@ -113,7 +127,7 @@ class PricingScreen extends ConsumerWidget {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                l10n.freePlanName,
+                                planName,
                                 style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800,
@@ -121,7 +135,7 @@ class PricingScreen extends ConsumerWidget {
                                 ),
                               ),
                               Text(
-                                l10n.freePlanTagline,
+                                planTagline,
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.white.withOpacity(0.5),
@@ -136,15 +150,19 @@ class PricingScreen extends ConsumerWidget {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 8),
                             decoration: BoxDecoration(
-                              color: AppColors.accent,
+                              color: isPaid
+                                  ? Colors.white.withValues(alpha: 0.15)
+                                  : AppColors.accent,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
-                              l10n.upgradeNow,
-                              style: const TextStyle(
+                              isPaid ? l10n.managePlan : l10n.upgradeNow,
+                              style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.primary,
+                                color: isPaid
+                                    ? Colors.white
+                                    : AppColors.primary,
                               ),
                             ),
                           ),
