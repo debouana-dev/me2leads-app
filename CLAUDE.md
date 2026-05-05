@@ -5,7 +5,7 @@ application. Read this first on every task touching this repository so
 changes stay consistent with the existing architecture, theme tokens, and
 conventions.
 
-**User directives (Apr 2026) — apply to every change without exception:**
+**User directives (Apr 2026 – May 2026) — apply to every change without exception:**
 
 1. **Focus exclusively on the mobile app** — do not prioritize the web build.
 2. **Dark / light mode on every design change.** Any new or modified UI widget
@@ -22,6 +22,15 @@ conventions.
    retrieve strings via `final l10n = ref.watch(l10nProvider)` and reference
    `l10n.xxx` — never hardcode a display string in a widget directly. French is
    the default (`_en == false`); English is the `_en == true` branch.
+4. **Schema sync on every database change.** Whenever any change is made to the
+   application's database structure — whether in `lib/services/database_service.dart`
+   (SQLite `_onCreate` / `_onUpgrade`) or in `lib/services/remote_sync_service.dart`
+   (`_ensureSchema` / `_upsertXxx`) — the file `docs/schema.sql` **must** be
+   updated in the same task to reflect those changes. The exported SQL script must
+   remain MySQL 8.0+ compatible and consistent with `_ensureSchema` (same column
+   types: `VARCHAR(50)` for datetimes, `TEXT` for arrays, `TINYINT(1)` for
+   booleans). Also add the corresponding `ALTER TABLE … ADD COLUMN IF NOT EXISTS`
+   block to the **UPGRADE SCRIPT** section of `docs/schema.sql` for any new column.
 
 ---
 
@@ -548,7 +557,8 @@ patch step in the workflow, not via committed files. Files under
 |----------------------------------------|------------------------------------------------------------------|
 | Add a new screen                       | create under `lib/screens/...`, register a `GoRoute` in `app_router.dart` with the existing slide/fade template |
 | Add a new tab to the shell             | extend `MainShell._screens` + the `_buildBottomNav` Row; update `currentTabProvider` default |
-| Add a new domain model                 | `lib/models/foo.dart` → add table in `_onCreate`, bump `_dbVersion` + `_onUpgrade` in `database_service.dart` |
+| Add a new domain model                 | `lib/models/foo.dart` → add table in `_onCreate`, bump `_dbVersion` + `_onUpgrade` in `database_service.dart` → update `_ensureSchema` in `remote_sync_service.dart` → update `docs/schema.sql` (CREATE TABLE + UPGRADE SCRIPT block) |
+| Any DB schema change                   | update `_onCreate` / `_onUpgrade` in `database_service.dart` + `_ensureSchema` in `remote_sync_service.dart` + `docs/schema.sql` (all three, same task) |
 | Tweak brand colour                     | edit `AppColors` — propagates via `AppTheme` + gradients         |
 | Add a new string                       | `AppStrings` (FR) + both branches in `app_l10n.dart`.            |
 | Add a platform permission              | patch the Python step in `.github/workflows/build.yml`, not `android/app/src/main/AndroidManifest.xml` (regenerated) |
