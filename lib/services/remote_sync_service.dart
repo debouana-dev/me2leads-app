@@ -264,11 +264,23 @@ class RemoteSyncService {
         `can_edit`           TINYINT(1)  NOT NULL DEFAULT 0,
         `can_create`         TINYINT(1)  NOT NULL DEFAULT 1,
         `can_view_reminders` TINYINT(1)  NOT NULL DEFAULT 0,
+        `can_view_history`   TINYINT(1)  NOT NULL DEFAULT 0,
         PRIMARY KEY (`id`),
         UNIQUE KEY `uq_org_members` (`organization_id`, `user_id`),
         INDEX `idx_org_members_org`  (`organization_id`),
         INDEX `idx_org_members_user` (`user_id`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ''');
+
+    // Upgrade existing cloud databases that were bootstrapped before v12.
+    await conn.execute('''
+      ALTER TABLE `organization_members`
+        ADD COLUMN IF NOT EXISTS `can_view_history` TINYINT(1) NOT NULL DEFAULT 0
+    ''');
+    await conn.execute('''
+      UPDATE `organization_members`
+        SET `can_view_history` = 1
+        WHERE `role` = 'admin' AND `can_view_history` = 0
     ''');
   }
 
