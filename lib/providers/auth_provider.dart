@@ -16,6 +16,7 @@ import '../services/database_service.dart';
 import '../services/email_service.dart';
 import '../services/encryption_service.dart';
 import '../services/photo_storage_service.dart';
+import '../services/background_task.dart';
 import '../services/remote_sync_service.dart';
 import '../services/storage_service.dart';
 
@@ -411,6 +412,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       plan: user.plan,
       clearError: true,
     );
+    if (user.plan == 'business') await scheduleBusinessSync();
     return true;
   }
 
@@ -430,12 +432,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
     await DatabaseService.updateUser(updated);
     await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
     state = state.copyWith(plan: plan);
+    if (plan == 'business') {
+      await scheduleBusinessSync();
+    } else {
+      await cancelBusinessSync();
+    }
     return null;
   }
 
   // ---------------- Logout ----------------
 
   Future<void> logout() async {
+    await cancelBusinessSync();
     await StorageService.clearSession();
     state = const AuthState();
   }
