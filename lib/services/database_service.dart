@@ -27,7 +27,7 @@ import 'web_db_factory_stub.dart'
 class DatabaseService {
   static Database? _db;
   static const _dbName = 'myleads.db';
-  static const _dbVersion = 11;
+  static const _dbVersion = 12;
 
   // ── Remote sync callbacks ──────────────────────────────────────────────────
   // Wired once at startup by RemoteSyncService.wireDatabase().
@@ -188,6 +188,12 @@ class DatabaseService {
     if (oldVersion < 11) {
       // v10 → v11: track when the user last successfully synchronized data
       try { await db.execute('ALTER TABLE users ADD COLUMN last_sync_at TEXT'); } catch (_) {}
+    }
+    if (oldVersion < 12) {
+      // v11 → v12: per-member permission to view shared-contact history authored by others
+      try { await db.execute('ALTER TABLE organization_members ADD COLUMN can_view_history INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+      // Admins can view all history by default
+      try { await db.execute("UPDATE organization_members SET can_view_history = 1 WHERE role = 'admin'"); } catch (_) {}
     }
   }
 
@@ -357,6 +363,7 @@ class DatabaseService {
         can_edit INTEGER NOT NULL DEFAULT 0,
         can_create INTEGER NOT NULL DEFAULT 1,
         can_view_reminders INTEGER NOT NULL DEFAULT 0,
+        can_view_history INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE (organization_id, user_id)
@@ -1186,6 +1193,7 @@ class DatabaseService {
         canEdit: isAdmin || (row['can_edit'] as int? ?? 0) == 1,
         canCreate: isAdmin || (row['can_create'] as int? ?? 1) == 1,
         canViewReminders: isAdmin || (row['can_view_reminders'] as int? ?? 0) == 1,
+        canViewHistory: isAdmin || (row['can_view_history'] as int? ?? 0) == 1,
       ));
     }
     return members;
@@ -1209,6 +1217,7 @@ class DatabaseService {
       'can_edit': isAdmin ? 1 : 0,
       'can_create': 1,
       'can_view_reminders': isAdmin ? 1 : 0,
+      'can_view_history': isAdmin ? 1 : 0,
     };
     await db.insert('organization_members', row, conflictAlgorithm: ConflictAlgorithm.ignore);
     _onRemoteUpsert?.call('organization_members', row);
@@ -1253,13 +1262,14 @@ class DatabaseService {
     return rows.isNotEmpty;
   }
 
-  /// Update the edit/create/view-reminders privileges for a single member.
+  /// Update the edit/create/view-reminders/view-history privileges for a single member.
   static Future<void> updateMemberPrivileges({
     required String orgId,
     required String userId,
     required bool canEdit,
     required bool canCreate,
     required bool canViewReminders,
+    required bool canViewHistory,
   }) async {
     final db = await database;
     await db.update(
@@ -1268,6 +1278,7 @@ class DatabaseService {
         'can_edit': canEdit ? 1 : 0,
         'can_create': canCreate ? 1 : 0,
         'can_view_reminders': canViewReminders ? 1 : 0,
+        'can_view_history': canViewHistory ? 1 : 0,
       },
       where: 'organization_id = ? AND user_id = ?',
       whereArgs: [orgId, userId],
@@ -1532,31 +1543,33 @@ class DatabaseService {
 
   /// Convenience: fetch all privilege flags for the current user in their org.
   /// Returns defaults (full access) when not in an org.
-  static Future<({bool canEdit, bool canCreate, bool canViewReminders})>
+  static Future<({bool canEdit, bool canCreate, bool canViewReminders, bool canViewHistory})>
       getMemberPrivileges({
     required String userId,
     required String? orgId,
   }) async {
     if (orgId == null) {
-      return (canEdit: true, canCreate: true, canViewReminders: true);
+      return (canEdit: true, canCreate: true, canViewReminders: true, canViewHistory: true);
     }
     final db = await database;
     final rows = await db.query(
       'organization_members',
-      columns: ['role', 'can_edit', 'can_create', 'can_view_reminders'],
+      columns: ['role', 'can_edit', 'can_create', 'can_view_reminders', 'can_view_history'],
       where: 'organization_id = ? AND user_id = ?',
       whereArgs: [orgId, userId],
       limit: 1,
     );
     if (rows.isEmpty) {
-      return (canEdit: true, canCreate: true, canViewReminders: true);
+      return (canEdit: true, canCreate: true, canViewReminders: true, canViewHistory: true);
     }
     final isAdmin = (rows.first['role'] as String?) == 'admin';
     final canEdit = isAdmin || (rows.first['can_edit'] as int? ?? 0) == 1;
     final canCreate = isAdmin || (rows.first['can_create'] as int? ?? 1) == 1;
     final canViewReminders =
         isAdmin || (rows.first['can_view_reminders'] as int? ?? 0) == 1;
-    return (canEdit: canEdit, canCreate: canCreate, canViewReminders: canViewReminders);
+    final canViewHistory =
+        isAdmin || (rows.first['can_view_history'] as int? ?? 0) == 1;
+    return (canEdit: canEdit, canCreate: canCreate, canViewReminders: canViewReminders, canViewHistory: canViewHistory);
   }
 
   /// Load reminders visible to [userId] within [orgId].

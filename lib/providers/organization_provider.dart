@@ -18,6 +18,7 @@ class OrgState {
   final bool currentUserCanEdit;         // can edit any org member's contacts
   final bool currentUserCanCreate;       // can create new contacts
   final bool currentUserCanViewReminders; // can view reminders on shared contacts
+  final bool currentUserCanViewHistory;  // can view history authored by other members
   // Deduplicated total contact count for the org (excludes hidden duplicates).
   final int uniqueContactCount;
 
@@ -29,6 +30,7 @@ class OrgState {
     this.currentUserCanEdit = true,
     this.currentUserCanCreate = true,
     this.currentUserCanViewReminders = true,
+    this.currentUserCanViewHistory = true,
     this.uniqueContactCount = 0,
   });
 
@@ -40,6 +42,7 @@ class OrgState {
     bool? currentUserCanEdit,
     bool? currentUserCanCreate,
     bool? currentUserCanViewReminders,
+    bool? currentUserCanViewHistory,
     int? uniqueContactCount,
     bool clearError = false,
     bool clearOrg = false,
@@ -53,6 +56,8 @@ class OrgState {
       currentUserCanCreate: currentUserCanCreate ?? this.currentUserCanCreate,
       currentUserCanViewReminders:
           currentUserCanViewReminders ?? this.currentUserCanViewReminders,
+      currentUserCanViewHistory:
+          currentUserCanViewHistory ?? this.currentUserCanViewHistory,
       uniqueContactCount: uniqueContactCount ?? this.uniqueContactCount,
     );
   }
@@ -89,6 +94,7 @@ class OrgNotifier extends StateNotifier<OrgState> {
         currentUserCanEdit: privs.canEdit,
         currentUserCanCreate: privs.canCreate,
         currentUserCanViewReminders: privs.canViewReminders,
+        currentUserCanViewHistory: privs.canViewHistory,
         uniqueContactCount: uniqueCount,
       );
     } catch (e) {
@@ -116,6 +122,7 @@ class OrgNotifier extends StateNotifier<OrgState> {
           currentUserCanEdit: privs.canEdit,
           currentUserCanCreate: privs.canCreate,
           currentUserCanViewReminders: privs.canViewReminders,
+          currentUserCanViewHistory: privs.canViewHistory,
         );
       } else {
         state = state.copyWith(members: members, uniqueContactCount: uniqueCount);
@@ -123,12 +130,13 @@ class OrgNotifier extends StateNotifier<OrgState> {
     } catch (_) {}
   }
 
-  /// Admin updates the edit/create/view-reminders privileges for a member.
+  /// Admin updates the edit/create/view-reminders/view-history privileges for a member.
   Future<String?> updateMemberPrivileges({
     required String userId,
     required bool canEdit,
     required bool canCreate,
     required bool canViewReminders,
+    required bool canViewHistory,
   }) async {
     final user = StorageService.currentUser;
     if (user == null) return 'Aucun utilisateur connecté';
@@ -149,6 +157,7 @@ class OrgNotifier extends StateNotifier<OrgState> {
         canEdit: canEdit,
         canCreate: canCreate,
         canViewReminders: canViewReminders,
+        canViewHistory: canViewHistory,
       );
       // Refresh members so UI reflects the change.
       await refreshMembers();
@@ -445,4 +454,10 @@ final orgCanViewRemindersProvider = Provider<bool>((ref) {
   final user = StorageService.currentUser;
   if (user?.organizationId == null) return true; // solo: always sees own reminders
   return ref.watch(organizationProvider).currentUserCanViewReminders;
+});
+
+final orgCanViewHistoryProvider = Provider<bool>((ref) {
+  final user = StorageService.currentUser;
+  if (user?.organizationId == null) return true; // solo: always sees own history
+  return ref.watch(organizationProvider).currentUserCanViewHistory;
 });

@@ -646,6 +646,8 @@ class AppL10n {
   String get privileges => _en ? 'Privileges' : 'Privilèges';
   String get viewRemindersPrivilege =>
       _en ? 'Can view shared reminders' : 'Peut voir les rappels partagés';
+  String get viewHistoryPrivilege =>
+      _en ? 'Can view shared contact history' : "Peut voir l'historique des contacts partagés";
   String get memberManagement => _en ? 'Manage member' : 'Gérer le membre';
   String get youLabel => _en ? '(you)' : '(vous)';
   String get suspendMember => _en ? 'Suspend' : 'Suspendre';

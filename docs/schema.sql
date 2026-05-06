@@ -162,11 +162,11 @@ CREATE TABLE IF NOT EXISTS `organizations` (
 
 
 -- ============================================================
--- TABLE: organization_members  (v7 + v8 privileges + v10 reminder access)
+-- TABLE: organization_members  (v7 + v8 privileges + v10 reminder access + v12 history access)
 -- role: admin | member
 -- status: active | suspended
--- can_edit / can_create / can_view_reminders: per-member flags.
--- Admins always have all three set to 1 regardless of stored value.
+-- can_edit / can_create / can_view_reminders / can_view_history: per-member flags.
+-- Admins always have all four set to 1 regardless of stored value.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS `organization_members` (
   `id`                  VARCHAR(36)  NOT NULL,
@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS `organization_members` (
   `can_edit`            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'overridden to 1 for role=admin',
   `can_create`          TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'overridden to 1 for role=admin',
   `can_view_reminders`  TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'overridden to 1 for role=admin',
+  `can_view_history`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'overridden to 1 for role=admin',
 
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_org_members` (`organization_id`, `user_id`),
@@ -221,6 +222,13 @@ ALTER TABLE `users`
   ADD COLUMN IF NOT EXISTS `last_sync_at` VARCHAR(50) DEFAULT NULL
     COMMENT 'ISO-8601 timestamp of last successful sync for this user';
 
+-- v12: per-member permission to view shared-contact history authored by other members
+ALTER TABLE `organization_members`
+  ADD COLUMN IF NOT EXISTS `can_view_history` TINYINT(1) NOT NULL DEFAULT 0;
+UPDATE `organization_members`
+  SET `can_view_history` = 1
+  WHERE `role` = 'admin';
+
 -- fix: widen invite_code from CHAR(6) to CHAR(8) — the app generator
 -- has always produced 8-character codes; CHAR(6) was a documentation error.
 ALTER TABLE `organizations`
@@ -239,4 +247,6 @@ ALTER TABLE `organizations`
 -- v10   : organization_members.can_view_reminders privilege column
 -- v11   : users.last_sync_at — per-user timestamp of last successful sync
 --         + correct invite_code width CHAR(6) → CHAR(8)
+-- v12   : organization_members.can_view_history — controls visibility of history
+--         records authored by other org members on shared contacts
 -- ============================================================

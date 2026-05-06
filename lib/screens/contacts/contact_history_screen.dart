@@ -8,7 +8,9 @@ import '../../core/l10n/app_l10n.dart';
 import '../../models/interaction.dart';
 import '../../models/reminder.dart';
 import '../../providers/contacts_provider.dart';
+import '../../providers/organization_provider.dart';
 import '../../providers/reminders_provider.dart';
+import '../../services/storage_service.dart';
 
 class ContactHistoryScreen extends ConsumerStatefulWidget {
   final String contactId;
@@ -45,13 +47,27 @@ class _ContactHistoryScreenState extends ConsumerState<ContactHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = ref.watch(l10nProvider);
+    final canViewHistory = ref.watch(orgCanViewHistoryProvider);
+    final currentUserId = StorageService.currentUser?.id ?? '';
+
     final remindersState = ref.watch(remindersProvider);
-    final doneForContact = remindersState.doneReminders
+    var doneForContact = remindersState.doneReminders
         .where((r) => r.contactIds.contains(widget.contactId))
         .toList();
 
+    var interactions = _interactions;
+    if (!canViewHistory) {
+      // Only show history entries the current user authored themselves.
+      interactions = interactions
+          .where((i) => i.ownerId == currentUserId)
+          .toList();
+      doneForContact = doneForContact
+          .where((r) => r.ownerId == currentUserId)
+          .toList();
+    }
+
     final entries = <_HistoryEntry>[
-      ..._interactions.map((i) => _HistoryEntry.fromInteraction(i, l10n)),
+      ...interactions.map((i) => _HistoryEntry.fromInteraction(i, l10n)),
       ...doneForContact.map((r) => _HistoryEntry.fromReminder(r, l10n)),
     ]..sort((a, b) => b.date.compareTo(a.date));
 

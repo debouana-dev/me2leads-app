@@ -1051,14 +1051,15 @@ class RemoteSyncService {
     await conn.execute('''
       INSERT INTO `organization_members`
         (id,organization_id,user_id,role,status,joined_at,
-         can_edit,can_create,can_view_reminders)
+         can_edit,can_create,can_view_reminders,can_view_history)
       VALUES
         (:id,:organization_id,:user_id,:role,:status,:joined_at,
-         :can_edit,:can_create,:can_view_reminders)
+         :can_edit,:can_create,:can_view_reminders,:can_view_history)
       ON DUPLICATE KEY UPDATE
         role=VALUES(role),status=VALUES(status),
         can_edit=VALUES(can_edit),can_create=VALUES(can_create),
-        can_view_reminders=VALUES(can_view_reminders)
+        can_view_reminders=VALUES(can_view_reminders),
+        can_view_history=VALUES(can_view_history)
     ''', {
       'id': r['id'],
       'organization_id': r['organization_id'],
@@ -1069,6 +1070,7 @@ class RemoteSyncService {
       'can_edit': r['can_edit'] ?? 0,
       'can_create': r['can_create'] ?? 1,
       'can_view_reminders': r['can_view_reminders'] ?? 0,
+      'can_view_history': r['can_view_history'] ?? 0,
     });
   }
 
@@ -1116,7 +1118,7 @@ class RemoteSyncService {
   // stored as int in SQLite as well (guard against String '0'/'1').
   static const _userBoolCols = {'email_verified'};
   static const _reminderBoolCols = {'is_completed'};
-  static const _memberBoolCols = {'can_edit', 'can_create', 'can_view_reminders'};
+  static const _memberBoolCols = {'can_edit', 'can_create', 'can_view_reminders', 'can_view_history'};
 
   static Map<String, dynamic> _normaliseBools(
       Map<String, dynamic> row, Set<String> boolCols) {
