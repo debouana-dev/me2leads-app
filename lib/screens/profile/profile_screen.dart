@@ -8,14 +8,28 @@ import '../../core/l10n/app_l10n.dart';
 import '../../core/theme/app_colors.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/contacts_provider.dart';
+import '../../providers/organization_provider.dart';
 import '../../providers/reminders_provider.dart';
 import '../../services/photo_storage_service.dart';
 import '../../services/storage_service.dart';
 
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
-  Future<void> _pickPhoto(BuildContext context, WidgetRef ref) async {
+  @override
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(organizationProvider.notifier).loadForCurrentUser();
+    });
+  }
+
+  Future<void> _pickPhoto(BuildContext context) async {
     if (kIsWeb) return;
     try {
       final image = await ImagePicker().pickImage(
@@ -62,13 +76,13 @@ class ProfileScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final l10n = ref.watch(l10nProvider);
     final auth = ref.watch(authProvider);
     final contacts = ref.watch(contactsProvider);
-    final currentUser = StorageService.currentUser;
-    final orgId = currentUser?.organizationId;
-    final orgRole = currentUser?.orgRole;
+    final orgState = ref.watch(organizationProvider);
+    final hasOrg = orgState.organization != null;
+    final orgRole = StorageService.currentUser?.orgRole;
     final displayName =
         auth.userName.isEmpty ? (l10n.isEnglish ? 'User' : 'Utilisateur') : auth.userName;
     final displayEmail = auth.userEmail.isEmpty ? '—' : auth.userEmail;
@@ -105,7 +119,7 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
                   GestureDetector(
-                    onTap: () => _pickPhoto(context, ref),
+                    onTap: () => _pickPhoto(context),
                     child: Stack(
                       children: [
                         Container(
@@ -265,7 +279,7 @@ class ProfileScreen extends ConsumerWidget {
                     () => context.push('/settings'),
                   ),
                   // ── Organization section ──────────────────────────────
-                  if (orgId != null)
+                  if (hasOrg)
                     _menuItem(
                       context,
                       Icons.corporate_fare_rounded,

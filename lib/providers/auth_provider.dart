@@ -638,6 +638,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     );
     await DatabaseService.updateUser(updated);
     await StorageService.setCurrentSession(updated, newToken);
+    state = state.copyWith(userEmail: newEmail.trim());
 
     // Clear the used code.
     _verificationCodes.remove(newLookup);
@@ -656,6 +657,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     return null; // success
+  }
+
+  /// Refreshes userName, userEmail, userPhotoPath and plan from the current
+  /// in-memory session so every Riverpod watcher rebuilds immediately.
+  /// Call this after any profile mutation that doesn't go through AuthNotifier
+  /// (e.g. saving first/last name in MyProfileScreen).
+  void refreshFromStorage() {
+    final user = StorageService.currentUser;
+    if (user == null) return;
+    state = state.copyWith(
+      userName: user.fullName,
+      userEmail: user.email,
+      userPhotoPath: user.photoPath,
+      plan: user.plan,
+    );
   }
 
   /// Update the current user's profile photo path.

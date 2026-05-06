@@ -7,6 +7,7 @@ import '../../core/l10n/app_l10n.dart';
 import '../../core/theme/app_colors.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/contacts_provider.dart';
+import '../../providers/organization_provider.dart';
 import '../../providers/reminders_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -74,6 +75,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (success) {
       await ref.read(contactsProvider.notifier).reload();
       await ref.read(remindersProvider.notifier).reload();
+      await ref.read(organizationProvider.notifier).loadForCurrentUser();
       if (mounted) context.go('/main');
     } else {
       // If login failed because email is not verified, redirect to verification
@@ -89,6 +91,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (success && mounted) {
       await ref.read(contactsProvider.notifier).reload();
       await ref.read(remindersProvider.notifier).reload();
+      await ref.read(organizationProvider.notifier).loadForCurrentUser();
       if (mounted) context.go('/main');
     }
   }
@@ -98,6 +101,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (success && mounted) {
       await ref.read(contactsProvider.notifier).reload();
       await ref.read(remindersProvider.notifier).reload();
+      await ref.read(organizationProvider.notifier).loadForCurrentUser();
       if (mounted) context.go('/main');
     }
   }

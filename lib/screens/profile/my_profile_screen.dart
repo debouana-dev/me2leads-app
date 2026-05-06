@@ -133,12 +133,7 @@ class _MyProfileScreenState extends ConsumerState<MyProfileScreen> {
       );
       await DatabaseService.updateUser(updated);
       await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
-
-      // Refresh auth state so userName updates everywhere
-      final notifier = ref.read(authProvider.notifier);
-      await notifier.updatePhoto(updated.photoPath); // triggers state refresh
-      // Directly patch the auth state with new name
-      ref.read(authProvider.notifier);
+      ref.read(authProvider.notifier).refreshFromStorage();
 
       if (mounted) {
         setState(() {
