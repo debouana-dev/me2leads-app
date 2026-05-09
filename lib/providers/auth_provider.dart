@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
@@ -160,6 +161,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await DatabaseService.updateUser(updated);
     }
     await StorageService.setCurrentSession(updated, token);
+    await EncryptionService.initFromEnv(updated.email);
 
     state = state.copyWith(
       isLoggedIn: true,
@@ -292,6 +294,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     await StorageService.setCurrentSession(user, token);
+    await EncryptionService.initFromEnv(user.email);
 
     state = state.copyWith(
       isLoggedIn: true,
@@ -313,9 +316,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final google = GoogleSignIn(
-          scopes: ['email'],
-          serverClientId:
-              '772969451694-npt8ctok5nbm0g6sl6t7ttmn6q7cbgqb.apps.googleusercontent.com');
+          scopes: ['email'], serverClientId: dotenv.env['SERVERCLIENTID']);
       final account = await google.signIn();
       if (account == null) {
         state = state.copyWith(isLoading: false);
@@ -376,6 +377,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
     required String lastName,
     required String provider,
   }) async {
+    // Initialize encryption with user-specific key for OAuth users
+    await EncryptionService.initFromEnv(email);
+
     final lookup = _emailLookup(email);
     var user = await DatabaseService.findUserByEmailLookup(lookup);
     final token = EncryptionService.generateSessionToken();
@@ -405,6 +409,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     await StorageService.setCurrentSession(user, token);
+    // Encryption already initialized above
     state = state.copyWith(
       isLoggedIn: true,
       isLoading: false,
@@ -641,6 +646,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     );
     await DatabaseService.updateUser(updated);
     await StorageService.setCurrentSession(updated, newToken);
+    await EncryptionService.initFromEnv(updated.email);
     state = state.copyWith(userEmail: newEmail.trim());
 
     // Clear the used code.
@@ -794,6 +800,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     final current = StorageService.currentUser;
     if (current != null && current.id == user.id) {
       await StorageService.setCurrentSession(updated, newToken);
+      await EncryptionService.initFromEnv(updated.email);
       state = state.copyWith(
         isLoggedIn: true,
         userName: updated.fullName,
@@ -878,6 +885,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       if (current != null && current.id == user.id) {
         await StorageService.setCurrentSession(
             updated, user.sessionToken ?? '');
+        await EncryptionService.initFromEnv(updated.email);
       }
     }
 

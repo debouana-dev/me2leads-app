@@ -96,6 +96,7 @@ dependencies:
   firebase_auth: ^6.4.0
   cloud_firestore: ^6.3.0
   firebase_storage: ^13.3.0
+  flutter_dotenv: ^6.0.1
 
 dev_dependencies:
   flutter_test:
@@ -112,8 +113,7 @@ hooks:
 flutter:
   uses-material-design: true
 
-  # Assets will be added when needed
-  # assets:
-  #   - assets/images/
+  assets:
+    - .env
   #   - assets/icons/
   #   - assets/animations/

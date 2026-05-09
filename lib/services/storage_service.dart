@@ -25,7 +25,7 @@ class StorageService {
   static UserAccount? _cachedUser;
 
   static Future<void> init() async {
-    await EncryptionService.init();
+    //await EncryptionService.init();
     // Cache the platform documents directory for cross-platform photo paths.
     await PhotoStorageService.init();
     // Open the database eagerly so the first query is fast.
