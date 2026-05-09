@@ -641,6 +641,17 @@ class RemoteSyncService {
     }
   }
 
+  /// Returns true when the local user has any non-user rows that should
+  /// be pushed before a cloud download.
+  static Future<bool> _hasLocalDataToPush(String userId) async {
+    final contacts = await DatabaseService.getRawContactRows(userId);
+    if (contacts.isNotEmpty) return true;
+    final reminders = await DatabaseService.getRawReminderRows(userId);
+    if (reminders.isNotEmpty) return true;
+    final interactions = await DatabaseService.getRawInteractionRows(userId);
+    return interactions.isNotEmpty;
+  }
+
   // ── Targeted user-field updates ─────────────────────────────────────────────
 
   /// Returns the `id` of the cloud user whose `email_lookup` matches [emailLookup],
@@ -768,12 +779,22 @@ class RemoteSyncService {
   /// When the user belongs to an organisation, also pulls contacts (and
   /// reminders when the member has `can_view_reminders = 1` or `role = admin`)
   /// from every active org member, so all members share one view of the data.
+  ///
+  /// If the user already has local data, this method first pushes local
+  /// changes online before downloading remote data back to local storage.
   static Future<SyncResult> pull(String userId) async {
     if (kIsWeb) return SyncResult.err('unsupported_platform');
 
     final connectivity = await Connectivity().checkConnectivity();
     if (connectivity.contains(ConnectivityResult.none)) {
       return SyncResult.err('no_connection');
+    }
+
+    if (await _hasLocalDataToPush(userId)) {
+      final pushResult = await push(userId);
+      if (!pushResult.success) {
+        return pushResult;
+      }
     }
 
     final conn = await _connect();
