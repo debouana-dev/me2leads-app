@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../config/app_config.dart';
 import '../../core/l10n/app_l10n.dart';
 import '../../core/theme/app_colors.dart';
+import '../../models/user_account.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../services/database_service.dart';
+import '../../services/storage_service.dart';
+import '../../services/stripe_service.dart';
 
 class SubscriptionPlanScreen extends ConsumerStatefulWidget {
   const SubscriptionPlanScreen({super.key});
@@ -18,18 +24,84 @@ class SubscriptionPlanScreen extends ConsumerStatefulWidget {
 class _SubscriptionPlanScreenState
     extends ConsumerState<SubscriptionPlanScreen> {
   String? _loadingPlan;
+  String _billingCycle = 'monthly'; // 'monthly' | 'yearly'
+
+  static const _uuid = Uuid();
+
+  bool get _stripeReady => AppConfig.stripePublishableKey.isNotEmpty;
 
   Future<void> _selectPlan(String planId) async {
+    final l10n = ref.read(l10nProvider);
+
+    // Free plan — no payment required.
+    if (planId == 'free') {
+      setState(() => _loadingPlan = planId);
+      final err = await ref.read(authProvider.notifier).changePlan(planId);
+      if (!mounted) return;
+      setState(() => _loadingPlan = null);
+      _showSnack(err == null ? l10n.planChangedSuccess : l10n.planChangeError,
+          err == null ? AppColors.success : AppColors.error);
+      return;
+    }
+
+    // Paid plan — Stripe PaymentSheet.
+    if (!_stripeReady) {
+      _showSnack('Stripe not configured (set stripePublishableKey in AppConfig)',
+          AppColors.warning);
+      return;
+    }
+
+    final currentUser = ref.read(authProvider);
     setState(() => _loadingPlan = planId);
-    final err = await ref.read(authProvider.notifier).changePlan(planId);
+
+    final result = await StripeService.startCheckout(
+      plan: planId,
+      billingCycle: _billingCycle,
+      userEmail: currentUser.userEmail,
+    );
+
     if (!mounted) return;
     setState(() => _loadingPlan = null);
-    final l10n = ref.read(l10nProvider);
+
+    if (result.success) {
+      // Persist payment record locally (live-write fires PostgreSQL upsert).
+      final amount = _priceAmount(planId);
+      final record = PaymentRecord(
+        id: _uuid.v4(),
+        userId: StorageService.currentUserId,
+        plan: planId,
+        billingCycle: _billingCycle,
+        amount: amount,
+        currency: 'EUR',
+        status: 'succeeded',
+        stripePaymentIntentId: result.paymentIntentId ?? '',
+        createdAt: DateTime.now().toIso8601String(),
+      );
+      await DatabaseService.insertPaymentRecord(record);
+
+      // Update subscription plan in DB + state.
+      await ref.read(authProvider.notifier).changePlan(planId);
+
+      if (mounted) _showSnack(l10n.paymentSuccess, AppColors.success);
+    } else {
+      final msg = result.errorCode == 'cancelled'
+          ? l10n.paymentCancelled
+          : l10n.paymentFailed;
+      _showSnack(msg, AppColors.error);
+    }
+  }
+
+  double _priceAmount(String planId) {
+    if (planId == 'premium') return _billingCycle == 'yearly' ? 29.99 : 2.99;
+    if (planId == 'business') return _billingCycle == 'yearly' ? 59.99 : 5.99;
+    return 0;
+  }
+
+  void _showSnack(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content:
-            Text(err == null ? l10n.planChangedSuccess : l10n.planChangeError),
-        backgroundColor: err == null ? AppColors.success : AppColors.error,
+        content: Text(msg),
+        backgroundColor: color,
       ),
     );
   }
@@ -40,6 +112,7 @@ class _SubscriptionPlanScreenState
     final currency = ref.watch(settingsProvider).currency;
     final eurToUsd = ref.watch(eurToUsdRateProvider);
     final currentPlan = ref.watch(authProvider).plan;
+    final isYearly = _billingCycle == 'yearly';
 
     return Scaffold(
       backgroundColor: AppColors.bg(context),
@@ -106,6 +179,16 @@ class _SubscriptionPlanScreenState
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
+                  // Billing cycle toggle
+                  _BillingToggle(
+                    cycle: _billingCycle,
+                    yearlySavingsLabel: l10n.yearlySavings,
+                    monthlyLabel: l10n.billingCycleMonthly,
+                    yearlyLabel: l10n.billingCycleYearly,
+                    onChanged: (c) => setState(() => _billingCycle = c),
+                  ),
+                  const SizedBox(height: 20),
+
                   // Free
                   _PlanCard(
                     title: l10n.freePlanName,
@@ -125,9 +208,12 @@ class _SubscriptionPlanScreenState
                   // Premium
                   _PlanCard(
                     title: l10n.premiumPlanName,
-                    price:
-                        l10n.premiumPrice(currency, eurToTargetRate: eurToUsd),
-                    period: l10n.premiumPeriod(currency),
+                    price: isYearly
+                        ? l10n.premiumYearlyPrice(currency, eurToTargetRate: eurToUsd)
+                        : l10n.premiumPrice(currency, eurToTargetRate: eurToUsd),
+                    period: isYearly
+                        ? l10n.premiumYearlyPeriod(currency)
+                        : l10n.premiumPeriod(currency),
                     description: l10n.premiumPlanDesc,
                     features: _premiumFeatures(l10n),
                     isPopular: true,
@@ -143,9 +229,12 @@ class _SubscriptionPlanScreenState
                   // Business
                   _PlanCard(
                     title: l10n.businessPlanName,
-                    price:
-                        l10n.businessPrice(currency, eurToTargetRate: eurToUsd),
-                    period: l10n.businessPeriod(currency),
+                    price: isYearly
+                        ? l10n.businessYearlyPrice(currency, eurToTargetRate: eurToUsd)
+                        : l10n.businessPrice(currency, eurToTargetRate: eurToUsd),
+                    period: isYearly
+                        ? l10n.businessYearlyPeriod(currency)
+                        : l10n.businessPeriod(currency),
                     description: l10n.businessPlanDesc,
                     features: _businessFeatures(l10n),
                     isPopular: false,
@@ -275,6 +364,95 @@ class _SubscriptionPlanScreenState
           fontSize: 12,
           fontWeight: FontWeight.w600,
           color: AppColors.primary,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Billing cycle toggle ─────────────────────────────────────────────────────
+
+class _BillingToggle extends StatelessWidget {
+  final String cycle;
+  final String monthlyLabel;
+  final String yearlyLabel;
+  final String yearlySavingsLabel;
+  final ValueChanged<String> onChanged;
+
+  const _BillingToggle({
+    required this.cycle,
+    required this.monthlyLabel,
+    required this.yearlyLabel,
+    required this.yearlySavingsLabel,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Row(
+        children: [
+          _tab(context, 'monthly', monthlyLabel),
+          _tab(context, 'yearly', yearlyLabel,
+              badge: yearlySavingsLabel),
+        ],
+      ),
+    );
+  }
+
+  Widget _tab(BuildContext context, String value, String label,
+      {String? badge}) {
+    final selected = cycle == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => onChanged(value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            gradient: selected ? AppColors.primaryGradient : null,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? Colors.white : AppColors.secondary(context),
+                ),
+              ),
+              if (badge != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? Colors.white.withOpacity(0.2)
+                        : AppColors.success.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    badge,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: selected ? Colors.white : AppColors.success,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );

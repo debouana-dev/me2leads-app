@@ -602,6 +602,25 @@ class AppL10n {
   String get statusPaid => _en ? 'Paid' : 'Payé';
   String get statusFailed => _en ? 'Failed' : 'Échoué';
   String get statusPending => _en ? 'Pending' : 'En attente';
+  String get billingCycleMonthly => _en ? 'Monthly' : 'Mensuel';
+  String get billingCycleYearly => _en ? 'Yearly' : 'Annuel';
+  String get yearlySavings => _en ? 'Save 16%' : 'Économisez 16%';
+  String get paymentSuccess => _en ? 'Payment successful' : 'Paiement réussi';
+  String get paymentCancelled => _en ? 'Payment cancelled' : 'Paiement annulé';
+  String get paymentFailed => _en ? 'Payment failed' : 'Paiement échoué';
+  String get billingCycleLabel => _en ? 'BILLING CYCLE' : 'CYCLE DE FACTURATION';
+  String premiumYearlyPrice(AppCurrency c, {double eurToTargetRate = 1.08}) =>
+      c == AppCurrency.usd
+          ? '\$${(29.99 * eurToTargetRate).toStringAsFixed(2)}'
+          : '29.99€';
+  String businessYearlyPrice(AppCurrency c, {double eurToTargetRate = 1.08}) =>
+      c == AppCurrency.usd
+          ? '\$${(59.99 * eurToTargetRate).toStringAsFixed(2)}'
+          : '59.99€';
+  String premiumYearlyPeriod(AppCurrency c) =>
+      c == AppCurrency.usd ? '/year' : '/ an';
+  String businessYearlyPeriod(AppCurrency c) =>
+      c == AppCurrency.usd ? '/user/year' : '/ utilisateur / an';
 
   // ─── Scan ─────────────────────────────────────────────────────────────────
   String get scanTitle => _en ? 'Scanner' : 'Scanner';
