@@ -131,8 +131,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     if (user.authProvider != 'email') {
-      final providerName =
-          user.authProvider == 'google' ? 'Google' : 'Apple';
+      final providerName = user.authProvider == 'google' ? 'Google' : 'Apple';
       state = state.copyWith(
         isLoading: false,
         error: _l10n.authWrongProvider(providerName),
@@ -660,6 +659,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
       return _l10n.authInvalidVerificationCode;
     }
 
+    // Preserve the old email so we can decrypt existing contacts with the old key.
+    final oldEmail = user.email;
+    await EncryptionService.initFromEnv(oldEmail);
+    final contacts = await DatabaseService.getAllContactsForOwner(user.id);
+
     // Rotate session token (invalidates other devices) and persist.
     final newToken = EncryptionService.generateSessionToken();
     final updated = user.copyWith(
@@ -671,6 +675,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     await StorageService.setCurrentSession(updated, newToken);
     await EncryptionService.initFromEnv(updated.email);
     state = state.copyWith(userEmail: newEmail.trim());
+
+    // Re-encrypt all contacts with the new email-derived key.
+    for (final contact in contacts) {
+      await DatabaseService.updateContact(contact);
+    }
 
     // Clear the used code.
     _verificationCodes.remove(newLookup);
@@ -743,13 +752,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final cloudResult =
           await RemoteSyncService.importUserByEmailLookup(lookup);
       if (cloudResult == null) return _l10n.authCloudConnectionError;
-      if (cloudResult) user = await DatabaseService.findUserByEmailLookup(lookup);
+      if (cloudResult)
+        user = await DatabaseService.findUserByEmailLookup(lookup);
       if (user == null) return _l10n.authNoAccountForEmailRecovery;
     }
 
     if (user.authProvider != 'email') {
-      final providerName =
-          user.authProvider == 'google' ? 'Google' : 'Apple';
+      final providerName = user.authProvider == 'google' ? 'Google' : 'Apple';
       return _l10n.authOAuthNoRecovery(providerName);
     }
 

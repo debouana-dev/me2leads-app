@@ -841,6 +841,8 @@ class DatabaseService {
       };
 
   static Contact _contactFromRow(Map<String, dynamic> row) {
+    final phoneEnc = row['phone'] as String?;
+    final emailEnc = row['email'] as String?;
     return Contact(
       id: row['id'] as String,
       ownerId: row['owner_id'] as String? ?? '',
@@ -848,8 +850,12 @@ class DatabaseService {
       lastName: row['last_name'] as String,
       jobTitle: row['job_title'] as String?,
       company: row['company'] as String?,
-      phone: row['phone'] as String?,
-      email: row['email'] as String?,
+      phone: (phoneEnc != null && phoneEnc.isNotEmpty)
+          ? EncryptionService.decryptText(phoneEnc)
+          : null,
+      email: (emailEnc != null && emailEnc.isNotEmpty)
+          ? EncryptionService.decryptText(emailEnc)
+          : null,
       source: row['source'] as String?,
       project1: row['project_1'] as String?,
       project1Budget: row['project_1_budget'] as String?,
