@@ -106,9 +106,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
     if (user == null) {
       // No local account — try the cloud database.
-      importedFromCloud =
+      final cloudResult =
           await RemoteSyncService.importUserByEmailLookup(lookup);
-      if (importedFromCloud) {
+      if (cloudResult == null) {
+        // Server unreachable or connection error — cannot confirm account status.
+        state = state.copyWith(
+          isLoading: false,
+          error: _l10n.authCloudConnectionError,
+        );
+        return false;
+      }
+      if (cloudResult) {
+        importedFromCloud = true;
         user = await DatabaseService.findUserByEmailLookup(lookup);
       }
       if (user == null) {
@@ -725,8 +734,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
     var user = await DatabaseService.findUserByEmailLookup(lookup);
     if (user == null) {
       // No local account — try the cloud database.
-      final imported = await RemoteSyncService.importUserByEmailLookup(lookup);
-      if (imported) user = await DatabaseService.findUserByEmailLookup(lookup);
+      final cloudResult =
+          await RemoteSyncService.importUserByEmailLookup(lookup);
+      if (cloudResult == null) return _l10n.authCloudConnectionError;
+      if (cloudResult) user = await DatabaseService.findUserByEmailLookup(lookup);
       if (user == null) return _l10n.authNoAccountForEmailRecovery;
     }
 

@@ -94,6 +94,9 @@ class AppL10n {
   String get authNoAccountForEmail => _en
       ? 'No account found for this email'
       : 'Aucun compte trouvé pour cet email';
+  String get authCloudConnectionError => _en
+      ? 'Unable to reach the server. Please check your connection and try again.'
+      : 'Impossible de contacter le serveur. Vérifiez votre connexion et réessayez.';
   String authWrongProvider(String provider) => _en
       ? 'This account uses $provider. Sign in via that service.'
       : 'Ce compte utilise $provider. Connectez-vous via ce service.';

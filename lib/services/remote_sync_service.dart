@@ -103,6 +103,8 @@ class RemoteSyncService {
 
   // ── Connection ──────────────────────────────────────────────────────────────
 
+  static const _kConnectTimeout = Duration(seconds: 10);
+
   static Future<MySQLConnection?> _connect() async {
     if (kIsWeb) return null;
     try {
@@ -114,8 +116,11 @@ class RemoteSyncService {
         databaseName: AppConfig.mysqlDatabase,
         secure: true,
       );
-      await conn.connect();
+      await conn.connect(timeoutMs: _kConnectTimeout.inMilliseconds);
       return conn;
+    } on TimeoutException catch (e) {
+      debugPrint('RemoteSyncService connect timeout: $e');
+      return null;
     } catch (e) {
       debugPrint('RemoteSyncService connect error: $e');
       return null;
@@ -393,14 +398,16 @@ class RemoteSyncService {
   /// and, if found, upserts the row into the local SQLite database so the
   /// normal auth flow can proceed on this device.
   ///
-  /// Returns `true` when a record was found and imported, `false` when there
-  /// is no network, the server is unreachable, or no matching record exists.
-  static Future<bool> importUserByEmailLookup(String emailLookup) async {
-    if (kIsWeb) return false;
+  /// Returns `true` when the record was found and imported successfully.
+  /// Returns `false` when the cloud confirms no matching record exists.
+  /// Returns `null` when there is no network, the server is unreachable,
+  /// or an unexpected error prevents the lookup from completing.
+  static Future<bool?> importUserByEmailLookup(String emailLookup) async {
+    if (kIsWeb) return null;
     final connectivity = await Connectivity().checkConnectivity();
-    if (connectivity.contains(ConnectivityResult.none)) return false;
+    if (connectivity.contains(ConnectivityResult.none)) return null;
     final conn = await _connect();
-    if (conn == null) return false;
+    if (conn == null) return null;
     try {
       if (!_schemaReady) {
         await _ensureSchema(conn);
@@ -419,7 +426,7 @@ class RemoteSyncService {
       return true;
     } catch (e) {
       debugPrint('RemoteSyncService importUserByEmailLookup error: $e');
-      return false;
+      return null;
     } finally {
       await conn.close();
     }
