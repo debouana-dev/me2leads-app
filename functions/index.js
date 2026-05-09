@@ -15,8 +15,8 @@ const ALLOWED_CYCLES = ['monthly', 'yearly'];
 
 // Price map (EUR cents) — keep in sync with StripeService in the Flutter app.
 const PRICES = {
-  premium:  { monthly: 299,  yearly: 2999 },
-  business: { monthly: 599,  yearly: 5999 },
+  premium:  { monthly: 3.59,  yearly: 35.88 },
+  business: { monthly: 7.19,  yearly: 71.88 },
 };
 
 /**

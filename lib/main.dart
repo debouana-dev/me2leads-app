@@ -16,14 +16,24 @@ import 'services/storage_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e, st) {
+    debugPrint('Firebase.initializeApp failed: $e\n$st');
+  }
 
   final stripeKey = AppConfig.stripePublishableKey;
   if (stripeKey.isNotEmpty) {
-    Stripe.publishableKey = stripeKey;
-    await Stripe.instance.applySettings();
+    try {
+      Stripe.publishableKey = stripeKey;
+      await Stripe.instance.applySettings()
+          .timeout(const Duration(seconds: 5));
+    } catch (e, st) {
+      debugPrint('Stripe.applySettings failed: $e\n$st');
+    }
   }
 
   // Attach the app-lifecycle observer used to infer completed
