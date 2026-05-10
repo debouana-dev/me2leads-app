@@ -102,6 +102,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     final lookup = _emailLookup(email);
+    await EncryptionService.initFromEnv(email);
     var user = await DatabaseService.findUserByEmailLookup(lookup);
     var importedFromCloud = false;
 

@@ -822,6 +822,9 @@ class RemoteSyncService {
         Sql.named('SELECT * FROM "users" WHERE "id" = @id'),
         parameters: {'id': userId},
       );
+      final localRow = await DatabaseService.getRawUserRow(userId);
+      final preservedToken = localRow?['session_token'] as String?;
+      final preservedPasswordHash = localRow?['password_hash'] as String?;
       for (final row in userResult) {
         final cloudRow = _normaliseBools(row.toColumnMap(), _userBoolCols);
         // Preserve the device-local session_token and password_hash.
@@ -829,12 +832,17 @@ class RemoteSyncService {
         // device's token; overwriting the local token would invalidate the
         // current session on the next app restart (StorageService.init
         // compares the secure-storage token with the DB value).
-        final localRow = await DatabaseService.getRawUserRow(userId);
         if (localRow != null) {
-          cloudRow['session_token'] = localRow['session_token'];
-          cloudRow['password_hash'] = localRow['password_hash'];
+          cloudRow['session_token'] = preservedToken;
+          cloudRow['password_hash'] = preservedPasswordHash;
         }
         await DatabaseService.upsertRawRow('users', cloudRow);
+      }
+      if (preservedToken != null && StorageService.currentUser?.id == userId) {
+        final refreshedUser = await DatabaseService.findUserById(userId);
+        if (refreshedUser != null) {
+          await StorageService.setCurrentSession(refreshedUser, preservedToken);
+        }
       }
 
       // Data-table pull is restricted to premium / business plans.
