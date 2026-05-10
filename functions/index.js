@@ -13,10 +13,11 @@ const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY');
 const ALLOWED_PLANS = ['premium', 'business'];
 const ALLOWED_CYCLES = ['monthly', 'yearly'];
 
-// Price map (EUR cents) — keep in sync with StripeService in the Flutter app.
+// Price map in EUR cents — keep in sync with StripeService in the Flutter app.
+// Stripe requires integer amounts in the smallest currency unit (1 EUR = 100 cents).
 const PRICES = {
-  premium:  { monthly: 3.59,  yearly: 35.88 },
-  business: { monthly: 7.19,  yearly: 71.88 },
+  premium:  { monthly: 359,  yearly: 3588 },
+  business: { monthly: 719,  yearly: 7188 },
 };
 
 /**
@@ -27,7 +28,7 @@ const PRICES = {
  * Returns:      { clientSecret, paymentIntentId }
  */
 exports.createPaymentIntent = onCall(
-  { region: 'europe-west1', enforceAppCheck: false, secrets: [stripeSecretKey] },
+  { region: 'europe-west1', invoker: 'public', enforceAppCheck: false, secrets: [stripeSecretKey] },
   async (request) => {
     const stripe = Stripe(stripeSecretKey.value());
     const { plan, billingCycle, currency = 'eur' } = request.data;
