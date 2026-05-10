@@ -284,6 +284,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       return false;
     }
 
+    await EncryptionService.initFromEnv(email.trim());
     final token = EncryptionService.generateSessionToken();
     final user = UserAccount(
       id: _uuid.v4(),
@@ -318,7 +319,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     await StorageService.setCurrentSession(user, token);
-    await EncryptionService.initFromEnv(user.email);
 
     state = state.copyWith(
       isLoggedIn: true,
