@@ -27,7 +27,7 @@ import 'web_db_factory_stub.dart'
 class DatabaseService {
   static Database? _db;
   static const _dbName = 'myleads.db';
-  static const _dbVersion = 15;
+  static const _dbVersion = 16;
 
   // ── Remote sync callbacks ──────────────────────────────────────────────────
   // Wired once at startup by RemoteSyncService.wireDatabase().
@@ -287,6 +287,16 @@ class DatabaseService {
             "ALTER TABLE payment_history ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'card'");
       } catch (_) {}
     }
+    if (oldVersion < 16) {
+      // v15 → v16: subscription expiry tracking on users
+      try {
+        await db.execute('ALTER TABLE users ADD COLUMN plan_expires_at TEXT');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE users ADD COLUMN subscription_billing_cycle TEXT');
+      } catch (_) {}
+    }
   }
 
   static Future<void> _onCreate(Database db, int version) async {
@@ -316,7 +326,9 @@ class DatabaseService {
         organization_id TEXT,
         org_role TEXT,
         plan TEXT NOT NULL DEFAULT 'free',
-        last_sync_at TEXT
+        last_sync_at TEXT,
+        plan_expires_at TEXT,
+        subscription_billing_cycle TEXT
       )
     ''');
 
@@ -624,6 +636,8 @@ class DatabaseService {
         'organization_id': u.organizationId,
         'org_role': u.orgRole,
         'plan': u.plan,
+        'plan_expires_at': u.planExpiresAt?.toIso8601String(),
+        'subscription_billing_cycle': u.subscriptionBillingCycle,
       };
 
   static UserAccount _userFromRow(Map<String, dynamic> row) {
@@ -663,6 +677,11 @@ class DatabaseService {
       organizationId: row['organization_id'] as String?,
       orgRole: row['org_role'] as String?,
       plan: row['plan'] as String? ?? 'free',
+      planExpiresAt: row['plan_expires_at'] != null
+          ? DateTime.tryParse(row['plan_expires_at'] as String)
+          : null,
+      subscriptionBillingCycle:
+          row['subscription_billing_cycle'] as String?,
     );
   }
 

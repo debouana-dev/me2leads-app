@@ -188,8 +188,10 @@ class RemoteSyncService {
         "email_verified"      SMALLINT     NOT NULL DEFAULT 0,
         "organization_id"     VARCHAR(36),
         "org_role"            VARCHAR(20),
-        "plan"                VARCHAR(20)  NOT NULL DEFAULT 'free',
-        "last_sync_at"        VARCHAR(50),
+        "plan"                        VARCHAR(20)  NOT NULL DEFAULT 'free',
+        "last_sync_at"                VARCHAR(50),
+        "plan_expires_at"             VARCHAR(50),
+        "subscription_billing_cycle"  VARCHAR(10),
         PRIMARY KEY ("id"),
         UNIQUE ("email_lookup")
       )
@@ -341,6 +343,14 @@ class RemoteSyncService {
         "ALTER TABLE \"payment_history\" ADD COLUMN IF NOT EXISTS \"payment_method\" VARCHAR(50) NOT NULL DEFAULT 'card'",
       );
     } catch (_) {}
+
+    // v16: subscription expiry tracking on users.
+    await conn.execute(
+      'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "plan_expires_at" VARCHAR(50) DEFAULT NULL',
+    );
+    await conn.execute(
+      'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "subscription_billing_cycle" VARCHAR(10) DEFAULT NULL',
+    );
   }
 
   // ── Cloud user helpers ───────────────────────────────────────────────────────
@@ -1080,13 +1090,15 @@ class RemoteSyncService {
          phone_enc,phone_lookup,date_of_birth_enc,company_name_enc,company_role_enc,
          biography_enc,password_hash,auth_provider,session_token,created_at,
          last_login_at,password_changed_at,photo_path,email_verified,
-         organization_id,org_role,plan,last_sync_at)
+         organization_id,org_role,plan,last_sync_at,
+         plan_expires_at,subscription_billing_cycle)
       VALUES
         (@id,@email_enc,@email_lookup,@first_name_enc,@last_name_enc,@nickname_enc,
          @phone_enc,@phone_lookup,@date_of_birth_enc,@company_name_enc,@company_role_enc,
          @biography_enc,@password_hash,@auth_provider,@session_token,@created_at,
          @last_login_at,@password_changed_at,@photo_path,@email_verified,
-         @organization_id,@org_role,@plan,@last_sync_at)
+         @organization_id,@org_role,@plan,@last_sync_at,
+         @plan_expires_at,@subscription_billing_cycle)
       ON CONFLICT (id) DO UPDATE SET
         email_enc=EXCLUDED.email_enc,
         email_lookup=EXCLUDED.email_lookup,
@@ -1103,7 +1115,9 @@ class RemoteSyncService {
         plan=EXCLUDED.plan,
         organization_id=EXCLUDED.organization_id,
         org_role=EXCLUDED.org_role,
-        last_sync_at=EXCLUDED.last_sync_at
+        last_sync_at=EXCLUDED.last_sync_at,
+        plan_expires_at=EXCLUDED.plan_expires_at,
+        subscription_billing_cycle=EXCLUDED.subscription_billing_cycle
     '''),
       parameters: {
         'id': r['id'],
@@ -1130,6 +1144,8 @@ class RemoteSyncService {
         'org_role': r['org_role'],
         'plan': r['plan'] ?? 'free',
         'last_sync_at': r['last_sync_at'],
+        'plan_expires_at': r['plan_expires_at'],
+        'subscription_billing_cycle': r['subscription_billing_cycle'],
       },
     );
   }

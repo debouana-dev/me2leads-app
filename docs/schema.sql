@@ -1,5 +1,5 @@
 -- ============================================================
--- me2leads  —  PostgreSQL schema v12
+-- me2leads  —  PostgreSQL schema v16
 -- PostgreSQL 14+
 -- Source of truth: lib/services/remote_sync_service.dart (_ensureSchema)
 --
@@ -47,8 +47,10 @@ CREATE TABLE IF NOT EXISTS "users" (
   "email_verified"       SMALLINT      NOT NULL DEFAULT 0,
   "organization_id"      VARCHAR(36)   DEFAULT NULL,
   "org_role"             VARCHAR(20)   DEFAULT NULL,
-  "plan"                 VARCHAR(20)   NOT NULL DEFAULT 'free',
-  "last_sync_at"         VARCHAR(50)   DEFAULT NULL,
+  "plan"                        VARCHAR(20)   NOT NULL DEFAULT 'free',
+  "last_sync_at"                VARCHAR(50)   DEFAULT NULL,
+  "plan_expires_at"             VARCHAR(50)   DEFAULT NULL,
+  "subscription_billing_cycle"  VARCHAR(10)   DEFAULT NULL,
 
   PRIMARY KEY ("id"),
   UNIQUE ("email_lookup")
@@ -268,6 +270,11 @@ CREATE INDEX IF NOT EXISTS "idx_payment_history_user" ON "payment_history" ("use
 ALTER TABLE "payment_history"
   ADD COLUMN IF NOT EXISTS "payment_method" VARCHAR(50) NOT NULL DEFAULT 'card';
 
+-- v16: subscription expiry tracking on users
+ALTER TABLE "users"
+  ADD COLUMN IF NOT EXISTS "plan_expires_at"            VARCHAR(50) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS "subscription_billing_cycle" VARCHAR(10) DEFAULT NULL;
+
 
 -- ============================================================
 -- Schema version history
@@ -284,4 +291,6 @@ ALTER TABLE "payment_history"
 --         records authored by other org members on shared contacts
 -- v13   : payment_history table — Stripe payment records (plan, cycle, amount)
 -- v15   : payment_history.payment_method — Stripe payment method type
+-- v16   : users.plan_expires_at + users.subscription_billing_cycle — subscription
+--         expiry date and billing cycle for auto-downgrade and renewal UI
 -- ============================================================

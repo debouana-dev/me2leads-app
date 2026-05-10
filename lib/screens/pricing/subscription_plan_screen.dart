@@ -12,6 +12,7 @@ import '../../providers/settings_provider.dart';
 import '../../services/database_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/stripe_service.dart';
+import '../../services/subscription_service.dart';
 
 class SubscriptionPlanScreen extends ConsumerStatefulWidget {
   const SubscriptionPlanScreen({super.key});
@@ -34,6 +35,10 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
   @override
   void initState() {
     super.initState();
+    // Default to the user's current billing cycle so the toggle matches
+    // what they last paid for (convenient for renewal).
+    final savedCycle = StorageService.currentUser?.subscriptionBillingCycle;
+    if (savedCycle != null) _billingCycle = savedCycle;
     WidgetsBinding.instance.addObserver(this);
     // Check for a payment that completed while the app was backgrounded
     // during a previous Link/redirect session (e.g. cold-start recovery).
@@ -89,7 +94,9 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
         createdAt: DateTime.now().toIso8601String(),
       );
       await DatabaseService.insertPaymentRecord(record);
-      await ref.read(authProvider.notifier).changePlan(recovery.plan);
+      await ref
+          .read(authProvider.notifier)
+          .changePlan(recovery.plan, billingCycle: recovery.billingCycle);
       if (mounted) _showSnack(l10n.paymentSuccess, AppColors.success);
     } finally {
       _recoveringPayment = false;
@@ -146,8 +153,10 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
       );
       await DatabaseService.insertPaymentRecord(record);
 
-      // Update subscription plan in DB + state.
-      await ref.read(authProvider.notifier).changePlan(planId);
+      // Update subscription plan in DB + state (sets expiry + schedules notifs).
+      await ref
+          .read(authProvider.notifier)
+          .changePlan(planId, billingCycle: _billingCycle);
 
       if (mounted) _showSnack(l10n.paymentSuccess, AppColors.success);
     } else {
@@ -179,8 +188,24 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
     final l10n = ref.watch(l10nProvider);
     final currency = ref.watch(settingsProvider).currency;
     final eurToUsd = ref.watch(eurToUsdRateProvider);
-    final currentPlan = ref.watch(authProvider).plan;
+    final authState = ref.watch(authProvider);
+    final currentPlan = authState.plan;
+    final planExpiresAt = authState.planExpiresAt;
+    final billingCycle = authState.subscriptionBillingCycle;
     final isYearly = _billingCycle == 'yearly';
+
+    // Renewal window: 5 days for monthly, 7 days for yearly.
+    final isInRenewalWindow = currentPlan != 'free' &&
+        SubscriptionService.isInRenewalWindow(planExpiresAt, billingCycle);
+
+    // Format expiry date for display.
+    String? expiryText;
+    if (planExpiresAt != null && currentPlan != 'free') {
+      final d = planExpiresAt;
+      final formatted =
+          '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+      expiryText = l10n.subscriptionExpiresOn(formatted);
+    }
 
     return Scaffold(
       backgroundColor: AppColors.bg(context),
@@ -288,10 +313,14 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
                     features: _premiumFeatures(l10n),
                     isPopular: true,
                     isCurrent: currentPlan == 'premium',
+                    isRenewable: currentPlan == 'premium' && isInRenewalWindow,
+                    expiryText:
+                        currentPlan == 'premium' ? expiryText : null,
                     isLoading: _loadingPlan == 'premium',
-                    onSelect: currentPlan == 'premium'
+                    onSelect: currentPlan == 'premium' && !isInRenewalWindow
                         ? null
                         : () => _selectPlan('premium'),
+                    renewLabel: l10n.renewAction,
                     l10n: l10n,
                   ),
                   const SizedBox(height: 16),
@@ -311,10 +340,14 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
                     features: _businessFeatures(l10n),
                     isPopular: false,
                     isCurrent: currentPlan == 'business',
+                    isRenewable: currentPlan == 'business' && isInRenewalWindow,
+                    expiryText:
+                        currentPlan == 'business' ? expiryText : null,
                     isLoading: _loadingPlan == 'business',
-                    onSelect: currentPlan == 'business'
+                    onSelect: currentPlan == 'business' && !isInRenewalWindow
                         ? null
                         : () => _selectPlan('business'),
+                    renewLabel: l10n.renewAction,
                     l10n: l10n,
                   ),
 
@@ -540,6 +573,9 @@ class _PlanCard extends StatelessWidget {
   final List<String> features;
   final bool isPopular;
   final bool isCurrent;
+  final bool isRenewable;
+  final String? expiryText;
+  final String? renewLabel;
   final bool isLoading;
   final VoidCallback? onSelect;
   final AppL10n l10n;
@@ -553,6 +589,9 @@ class _PlanCard extends StatelessWidget {
     required this.l10n,
     this.period,
     this.isCurrent = false,
+    this.isRenewable = false,
+    this.expiryText,
+    this.renewLabel,
     this.isLoading = false,
     this.onSelect,
   });
@@ -632,6 +671,26 @@ class _PlanCard extends StatelessWidget {
                   ),
                 ),
               ],
+              if (isRenewable) ...[
+                const SizedBox(width: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    l10n.expiringBadge,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.warning,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 8),
@@ -676,6 +735,35 @@ class _PlanCard extends StatelessWidget {
                   : AppColors.secondary(context),
             ),
           ),
+          if (expiryText != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(
+                  Icons.calendar_today_rounded,
+                  size: 13,
+                  color: isRenewable
+                      ? AppColors.warning
+                      : (isPopular
+                          ? Colors.white.withOpacity(0.6)
+                          : AppColors.hint(context)),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  expiryText!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isRenewable
+                        ? AppColors.warning
+                        : (isPopular
+                            ? Colors.white.withOpacity(0.6)
+                            : AppColors.hint(context)),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 16),
 
           // Features
@@ -704,7 +792,7 @@ class _PlanCard extends StatelessWidget {
                 ),
               )),
 
-          if (!isCurrent) ...[
+          if (!isCurrent || isRenewable) ...[
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -712,9 +800,12 @@ class _PlanCard extends StatelessWidget {
               child: ElevatedButton(
                 onPressed: isLoading ? null : onSelect,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      isPopular ? AppColors.accent : AppColors.primary,
-                  foregroundColor: isPopular ? AppColors.primary : Colors.white,
+                  backgroundColor: isRenewable
+                      ? AppColors.warning
+                      : (isPopular ? AppColors.accent : AppColors.primary),
+                  foregroundColor: isRenewable
+                      ? Colors.white
+                      : (isPopular ? AppColors.primary : Colors.white),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -725,11 +816,17 @@ class _PlanCard extends StatelessWidget {
                         height: 22,
                         child: CircularProgressIndicator(
                           strokeWidth: 2.5,
-                          color: isPopular ? AppColors.primary : Colors.white,
+                          color: isRenewable
+                              ? Colors.white
+                              : (isPopular
+                                  ? AppColors.primary
+                                  : Colors.white),
                         ),
                       )
                     : Text(
-                        '${l10n.choosePlanCta} $title',
+                        isRenewable
+                            ? (renewLabel ?? l10n.renewAction)
+                            : '${l10n.choosePlanCta} $title',
                         style: const TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,

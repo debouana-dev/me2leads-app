@@ -1026,6 +1026,21 @@ class AppL10n {
           : '7.19€';
 
   String currencySymbol(AppCurrency c) => c == AppCurrency.usd ? '\$' : '€';
+
+  // ─── Subscription expiry & renewal ────────────────────────────────────────
+  String subscriptionExpiresOn(String date) =>
+      _en ? 'Expires on $date' : 'Expire le $date';
+  String get subscriptionExpired =>
+      _en ? 'Subscription expired' : 'Abonnement expiré';
+  String get renewSubscription =>
+      _en ? 'Renew subscription' : "Renouveler l'abonnement";
+  String get renewAction => _en ? 'Renew' : 'Renouveler';
+  String get expiringBadge => _en ? 'EXPIRING SOON' : 'EXPIRE BIENTÔT';
+  String get subscriptionRenewalBadge =>
+      _en ? 'SUBSCRIPTION' : 'ABONNEMENT';
+  String subscriptionDaysLeft(int days) => _en
+      ? '$days day${days > 1 ? "s" : ""} remaining'
+      : '$days jour${days > 1 ? "s" : ""} restant${days > 1 ? "s" : ""}';
 }
 
 final l10nProvider = Provider<AppL10n>((ref) {

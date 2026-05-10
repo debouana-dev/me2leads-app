@@ -17,12 +17,16 @@ import '../models/user_account.dart';
 import '../services/database_service.dart';
 import '../services/email_service.dart';
 import '../services/encryption_service.dart';
+import '../services/notification_service.dart';
 import '../services/photo_storage_service.dart';
 import '../services/background_task.dart';
 import '../services/remote_sync_service.dart';
 import '../services/storage_service.dart';
 
 const _uuid = Uuid();
+
+// Sentinel used in AuthState.copyWith to distinguish "not provided" from null.
+const _authSentinel = Object();
 
 /// In-memory container for a pending password-recovery code.
 class _RecoveryCode {
@@ -43,6 +47,12 @@ class AuthState {
   /// Current subscription plan: 'free' | 'premium' | 'business'.
   final String plan;
 
+  /// When the current paid subscription expires (null for free plan).
+  final DateTime? planExpiresAt;
+
+  /// 'monthly' | 'yearly' | null (null for free plan).
+  final String? subscriptionBillingCycle;
+
   const AuthState({
     this.isLoggedIn = false,
     this.isLoading = false,
@@ -51,6 +61,8 @@ class AuthState {
     this.userPhotoPath,
     this.error,
     this.plan = 'free',
+    this.planExpiresAt,
+    this.subscriptionBillingCycle,
   });
 
   AuthState copyWith({
@@ -63,6 +75,8 @@ class AuthState {
     bool clearError = false,
     bool clearPhoto = false,
     String? plan,
+    Object? planExpiresAt = _authSentinel,
+    Object? subscriptionBillingCycle = _authSentinel,
   }) {
     return AuthState(
       isLoggedIn: isLoggedIn ?? this.isLoggedIn,
@@ -72,6 +86,12 @@ class AuthState {
       userPhotoPath: clearPhoto ? null : (userPhotoPath ?? this.userPhotoPath),
       error: clearError ? null : (error ?? this.error),
       plan: plan ?? this.plan,
+      planExpiresAt: identical(planExpiresAt, _authSentinel)
+          ? this.planExpiresAt
+          : planExpiresAt as DateTime?,
+      subscriptionBillingCycle: identical(subscriptionBillingCycle, _authSentinel)
+          ? this.subscriptionBillingCycle
+          : subscriptionBillingCycle as String?,
     );
   }
 }
@@ -86,6 +106,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
           userEmail: StorageService.userEmail,
           userPhotoPath: StorageService.currentUser?.photoPath,
           plan: StorageService.currentUser?.plan ?? 'free',
+          planExpiresAt: StorageService.currentUser?.planExpiresAt,
+          subscriptionBillingCycle:
+              StorageService.currentUser?.subscriptionBillingCycle,
         ));
 
   AppL10n get _l10n => _ref.read(l10nProvider);
@@ -483,22 +506,59 @@ class AuthNotifier extends StateNotifier<AuthState> {
   /// Switches the current user's subscription plan, persists it to the database,
   /// and updates the in-memory session so every Riverpod listener is notified.
   ///
+  /// [billingCycle] is required for paid plans ('monthly' | 'yearly').
+  /// It is ignored when [plan] is 'free'.
+  ///
   /// Returns `null` on success, or an error string on failure.
-  Future<String?> changePlan(String plan) async {
+  Future<String?> changePlan(String plan,
+      {String billingCycle = 'monthly'}) async {
     final user = StorageService.currentUser;
     if (user == null) return _l10n.authNoUserLoggedIn;
     if (!['free', 'premium', 'business'].contains(plan)) {
       return _l10n.authInvalidPlan;
     }
-    final updated = user.copyWith(plan: plan);
+
+    DateTime? planExpiresAt;
+    String? subscriptionBillingCycle;
+
+    if (plan != 'free') {
+      planExpiresAt = billingCycle == 'yearly'
+          ? DateTime.now().add(const Duration(days: 365))
+          : DateTime.now().add(const Duration(days: 30));
+      subscriptionBillingCycle = billingCycle;
+    }
+
+    final updated = user.copyWith(
+      plan: plan,
+      planExpiresAt: planExpiresAt,
+      subscriptionBillingCycle: subscriptionBillingCycle,
+    );
     await DatabaseService.updateUser(updated);
     await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
-    state = state.copyWith(plan: plan);
+    state = state.copyWith(
+      plan: plan,
+      planExpiresAt: planExpiresAt,
+      subscriptionBillingCycle: subscriptionBillingCycle,
+    );
+
     if (plan == 'business') {
       await scheduleBusinessSync();
     } else {
       await cancelBusinessSync();
     }
+
+    // Manage subscription renewal push notifications.
+    if (plan == 'free') {
+      unawaited(NotificationService.cancelSubscriptionRenewalNotifications(
+          user.id));
+    } else {
+      unawaited(NotificationService.scheduleSubscriptionRenewalNotifications(
+        userId: user.id,
+        planExpiresAt: planExpiresAt!,
+        billingCycle: billingCycle,
+      ));
+    }
+
     return null;
   }
 
@@ -754,6 +814,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
       userEmail: user.email,
       userPhotoPath: user.photoPath,
       plan: user.plan,
+      planExpiresAt: user.planExpiresAt,
+      subscriptionBillingCycle: user.subscriptionBillingCycle,
     );
   }
 
