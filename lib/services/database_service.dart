@@ -27,7 +27,7 @@ import 'web_db_factory_stub.dart'
 class DatabaseService {
   static Database? _db;
   static const _dbName = 'myleads.db';
-  static const _dbVersion = 16;
+  static const _dbVersion = 17;
 
   // ── Remote sync callbacks ──────────────────────────────────────────────────
   // Wired once at startup by RemoteSyncService.wireDatabase().
@@ -297,6 +297,25 @@ class DatabaseService {
             'ALTER TABLE users ADD COLUMN subscription_billing_cycle TEXT');
       } catch (_) {}
     }
+    if (oldVersion < 17) {
+      // v16 → v17: org license count, expiry, and suspension tracking
+      try {
+        await db.execute(
+            'ALTER TABLE organizations ADD COLUMN license_count INTEGER NOT NULL DEFAULT 1');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE organizations ADD COLUMN org_plan_expires_at TEXT');
+      } catch (_) {}
+      try {
+        await db.execute(
+            "ALTER TABLE organizations ADD COLUMN org_status TEXT NOT NULL DEFAULT 'active'");
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE organizations ADD COLUMN org_suspended_at TEXT');
+      } catch (_) {}
+    }
   }
 
   static Future<void> _onCreate(Database db, int version) async {
@@ -445,14 +464,18 @@ class DatabaseService {
     await db.execute(
         'CREATE INDEX idx_notifications_owner ON notifications(owner_id)');
 
-    // ----- ORGANIZATIONS (v7) -----
+    // ----- ORGANIZATIONS (v7, license columns added v17) -----
     await db.execute('''
       CREATE TABLE organizations (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         owner_id TEXT NOT NULL,
         invite_code TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        license_count INTEGER NOT NULL DEFAULT 1,
+        org_plan_expires_at TEXT,
+        org_status TEXT NOT NULL DEFAULT 'active',
+        org_suspended_at TEXT
       )
     ''');
 
@@ -1329,6 +1352,10 @@ class DatabaseService {
         'owner_id': o.ownerId,
         'invite_code': o.inviteCode,
         'created_at': o.createdAt.toIso8601String(),
+        'license_count': o.licenseCount,
+        'org_plan_expires_at': o.orgPlanExpiresAt?.toIso8601String(),
+        'org_status': o.orgStatus,
+        'org_suspended_at': o.orgSuspendedAt?.toIso8601String(),
       };
 
   static Organization _orgFromRow(Map<String, dynamic> row) => Organization(
@@ -1337,7 +1364,57 @@ class DatabaseService {
         ownerId: row['owner_id'] as String,
         inviteCode: row['invite_code'] as String,
         createdAt: DateTime.parse(row['created_at'] as String),
+        licenseCount: (row['license_count'] as int?) ?? 1,
+        orgPlanExpiresAt: row['org_plan_expires_at'] != null
+            ? DateTime.tryParse(row['org_plan_expires_at'] as String)
+            : null,
+        orgStatus: (row['org_status'] as String?) ?? 'active',
+        orgSuspendedAt: row['org_suspended_at'] != null
+            ? DateTime.tryParse(row['org_suspended_at'] as String)
+            : null,
       );
+
+  /// Suspend or reactivate an organization without touching the full row.
+  static Future<void> updateOrgStatus(
+    String orgId,
+    String status, {
+    DateTime? suspendedAt,
+  }) async {
+    final db = await database;
+    await db.update(
+      'organizations',
+      {
+        'org_status': status,
+        'org_suspended_at': suspendedAt?.toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [orgId],
+    );
+    final org = await findOrganizationById(orgId);
+    if (org != null) _onRemoteUpsert?.call('organizations', _orgToRow(org));
+  }
+
+  /// Update license count + expiry after a successful renewal payment.
+  static Future<void> updateOrgLicenses(
+    String orgId,
+    int licenseCount,
+    DateTime expiresAt,
+  ) async {
+    final db = await database;
+    await db.update(
+      'organizations',
+      {
+        'license_count': licenseCount,
+        'org_plan_expires_at': expiresAt.toIso8601String(),
+        'org_status': 'active',
+        'org_suspended_at': null,
+      },
+      where: 'id = ?',
+      whereArgs: [orgId],
+    );
+    final org = await findOrganizationById(orgId);
+    if (org != null) _onRemoteUpsert?.call('organizations', _orgToRow(org));
+  }
 
   // =====================================================================
   // ORGANIZATION MEMBERS

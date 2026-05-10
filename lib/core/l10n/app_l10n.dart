@@ -794,6 +794,67 @@ class AppL10n {
       ? '$n active member${n == 1 ? '' : 's'}'
       : '$n membre${n > 1 ? 's' : ''} actif${n > 1 ? 's' : ''}';
 
+  // ─── Organization licensing ───────────────────────────────────────────────
+  String get orgBusinessPlanRequired =>
+      _en ? 'Business plan required' : 'Plan Business requis';
+  String get orgBusinessPlanRequiredDesc => _en
+      ? 'Only Business-plan accounts can create an organization. Upgrade your plan to continue.'
+      : "Seuls les comptes Business peuvent créer une organisation. Passez au plan Business pour continuer.";
+  String get orgSelectLicenses =>
+      _en ? 'NUMBER OF LICENSES' : 'NOMBRE DE LICENCES';
+  String get orgSelectLicensesHint => _en
+      ? 'Includes your own account'
+      : 'Inclut votre propre compte';
+  String orgLicenseCount(int n) =>
+      _en ? '$n license${n == 1 ? '' : 's'}' : '$n licence${n > 1 ? 's' : ''}';
+  String orgSeatsUsed(int used, int total) => _en
+      ? '$used / $total seat${total == 1 ? '' : 's'} used'
+      : '$used / $total place${total > 1 ? 's' : ''} utilisée${total > 1 ? 's' : ''}';
+  String orgExpiresOn(String date) =>
+      _en ? 'Expires on $date' : 'Expire le $date';
+  String get orgLicensesTitle => _en ? 'Licenses' : 'Licences';
+  String get orgLicensesDesc =>
+      _en ? 'Manage organization licenses' : "Gérer les licences de l'organisation";
+  String get orgSuspendedBanner =>
+      _en ? 'Organization suspended' : 'Organisation suspendue';
+  String get orgSuspendedDesc => _en
+      ? 'Licenses have expired. Renew to restore access to shared contacts.'
+      : "Les licences ont expiré. Renouvelez pour rétablir l'accès aux contacts partagés.";
+  String get orgExpiredBanner =>
+      _en ? 'Licenses expired' : 'Licences expirées';
+  String get renewOrgLicenses =>
+      _en ? 'Renew licenses' : 'Renouveler les licences';
+  String orgRenewalAmount(String amount) =>
+      _en ? 'Total: $amount' : 'Total : $amount';
+  String get orgLicensesRenewed =>
+      _en ? 'Licenses renewed successfully' : 'Licences renouvelées avec succès';
+  String get orgAtCapacity => _en
+      ? 'No seats available. The organization has reached its member limit.'
+      : "Plus de places disponibles. L'organisation a atteint sa limite de membres.";
+  String get orgSuspendedJoinError => _en
+      ? 'This organization is currently suspended.'
+      : 'Cette organisation est actuellement suspendue.';
+  String get orgPayAndCreate =>
+      _en ? 'Pay and create organization' : "Payer et créer l'organisation";
+  String get orgBillingCycle => _en ? 'BILLING CYCLE' : 'CYCLE DE FACTURATION';
+  String get orgMonthly => _en ? 'Monthly' : 'Mensuel';
+  String get orgYearly => _en ? 'Yearly' : 'Annuel';
+  String get orgPricePerLicense =>
+      _en ? 'per license / month' : 'par licence / mois';
+  String get orgPricePerLicenseYearly =>
+      _en ? 'per license / year' : 'par licence / an';
+  String orgDeletionWarning(int days) => _en
+      ? 'Organization data will be permanently deleted in $days day${days == 1 ? '' : 's'} if licenses are not renewed.'
+      : "Les données de l'organisation seront définitivement supprimées dans $days jour${days > 1 ? 's' : ''} si les licences ne sont pas renouvelées.";
+  String get orgRenewToContinue =>
+      _en ? 'Renew to continue' : 'Renouvelez pour continuer';
+  String get orgLicensesIncludeAdmin => _en
+      ? 'Your admin account counts as 1 license. Minimum is 1.'
+      : 'Votre compte administrateur compte pour 1 licence. Minimum : 1.';
+  String get orgCannotReduceBelow => _en
+      ? 'Cannot reduce below current member count'
+      : 'Impossible de réduire en dessous du nombre de membres actuels';
+
   // ─── Import / Export ─────────────────────────────────────────────────────
   String get importExportTitle => _en ? 'Import / Export' : 'Import / Export';
   String get importExportSubtitle =>

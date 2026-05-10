@@ -1,5 +1,5 @@
 -- ============================================================
--- me2leads  —  PostgreSQL schema v16
+-- me2leads  —  PostgreSQL schema v17
 -- PostgreSQL 14+
 -- Source of truth: lib/services/remote_sync_service.dart (_ensureSchema)
 --
@@ -142,16 +142,24 @@ CREATE INDEX IF NOT EXISTS "idx_interactions_contact" ON "interactions" ("contac
 
 
 -- ============================================================
--- TABLE: organizations  (v7)
+-- TABLE: organizations  (v7, license columns added v17)
 -- invite_code: 8-char alphanumeric code [A-Z2-9] — no 0/O/1/I.
 -- owner_id: not FK-enforced; references users.id logically.
+-- license_count: number of Business licenses purchased (includes admin).
+-- org_status: 'active' | 'suspended' — suspended when licenses expire.
+-- org_plan_expires_at: when the org licenses expire.
+-- org_suspended_at: timestamp of suspension (triggers 6-month deletion).
 -- ============================================================
 CREATE TABLE IF NOT EXISTS "organizations" (
-  "id"           VARCHAR(36)   NOT NULL,
-  "name"         VARCHAR(255)  NOT NULL,
-  "owner_id"     VARCHAR(36)   NOT NULL,
-  "invite_code"  CHAR(8)       NOT NULL,
-  "created_at"   VARCHAR(50)   NOT NULL,
+  "id"                  VARCHAR(36)   NOT NULL,
+  "name"                VARCHAR(255)  NOT NULL,
+  "owner_id"            VARCHAR(36)   NOT NULL,
+  "invite_code"         CHAR(8)       NOT NULL,
+  "created_at"          VARCHAR(50)   NOT NULL,
+  "license_count"       INTEGER       NOT NULL DEFAULT 1,
+  "org_plan_expires_at" VARCHAR(50)   DEFAULT NULL,
+  "org_status"          VARCHAR(20)   NOT NULL DEFAULT 'active',
+  "org_suspended_at"    VARCHAR(50)   DEFAULT NULL,
 
   PRIMARY KEY ("id"),
   UNIQUE ("invite_code")
@@ -275,6 +283,13 @@ ALTER TABLE "users"
   ADD COLUMN IF NOT EXISTS "plan_expires_at"            VARCHAR(50) DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS "subscription_billing_cycle" VARCHAR(10) DEFAULT NULL;
 
+-- v17: org license count, expiry, and suspension tracking
+ALTER TABLE "organizations"
+  ADD COLUMN IF NOT EXISTS "license_count"       INTEGER     NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS "org_plan_expires_at" VARCHAR(50) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS "org_status"          VARCHAR(20) NOT NULL DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS "org_suspended_at"    VARCHAR(50) DEFAULT NULL;
+
 
 -- ============================================================
 -- Schema version history
@@ -293,4 +308,7 @@ ALTER TABLE "users"
 -- v15   : payment_history.payment_method — Stripe payment method type
 -- v16   : users.plan_expires_at + users.subscription_billing_cycle — subscription
 --         expiry date and billing cycle for auto-downgrade and renewal UI
+-- v17   : organizations.license_count + org_plan_expires_at + org_status +
+--         org_suspended_at — per-org Business license pool with expiry,
+--         suspension, and 6-month cloud deletion lifecycle
 -- ============================================================

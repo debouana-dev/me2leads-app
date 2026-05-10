@@ -219,10 +219,12 @@ class StripeService {
     required String plan,
     required String billingCycle,
     required String userEmail,
+    int licenseCount = 1,
   }) async {
-    final amount = billingCycle == 'yearly'
+    final unitAmount = billingCycle == 'yearly'
         ? (_yearlyPrices[plan] ?? 0)
         : (_monthlyPrices[plan] ?? 0);
+    final amount = unitAmount * licenseCount;
 
     if (amount == 0) {
       return const PaymentCheckoutResult(
@@ -242,6 +244,7 @@ class StripeService {
         'billingCycle': billingCycle,
         'amount': amount,
         'currency': 'eur',
+        'licenseCount': licenseCount,
       });
       final data = result.data as Map<String, dynamic>;
       clientSecret = data['clientSecret'] as String;

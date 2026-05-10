@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/organization.dart';
+import '../services/background_task.dart';
 import '../services/database_service.dart';
+import '../services/remote_sync_service.dart';
 import '../services/storage_service.dart';
 
 const _uuid = Uuid();
@@ -33,6 +35,20 @@ class OrgState {
     this.currentUserCanViewHistory = true,
     this.uniqueContactCount = 0,
   });
+
+  // ── Derived from organization ──────────────────────────────────────────────
+
+  int get licenseCount => organization?.licenseCount ?? 1;
+  DateTime? get orgPlanExpiresAt => organization?.orgPlanExpiresAt;
+  bool get isOrgSuspended => organization?.isSuspended ?? false;
+  bool get isOrgExpired => organization?.isExpired ?? false;
+  bool get isPastDeletionWindow => organization?.isPastDeletionWindow ?? false;
+
+  /// Total members (active + suspended) — all count toward license usage.
+  int get totalMemberCount => members.length;
+
+  /// Seats still available for new members.
+  int get availableSeats => licenseCount - totalMemberCount;
 
   OrgState copyWith({
     Organization? organization,
@@ -75,11 +91,34 @@ class OrgNotifier extends StateNotifier<OrgState> {
     }
     state = state.copyWith(isLoading: true, clearError: true);
     try {
-      final org = await DatabaseService.findOrganizationById(user.organizationId!);
+      var org = await DatabaseService.findOrganizationById(user.organizationId!);
       if (org == null) {
         state = const OrgState();
         return;
       }
+
+      // ── Expiry / suspension lifecycle ──────────────────────────────────────
+
+      // Org has been suspended for 6+ months → permanently delete cloud data
+      // and local data, then clear state.
+      if (org.isPastDeletionWindow) {
+        await RemoteSyncService.deleteOrganizationDataFromCloud(org.id);
+        await DatabaseService.deleteOrganization(org.id);
+        state = const OrgState();
+        return;
+      }
+
+      // Licenses just expired but org is still marked active → suspend it now.
+      if (!org.isSuspended && org.isExpired) {
+        final suspendedAt = DateTime.now();
+        await DatabaseService.updateOrgStatus(
+          org.id,
+          'suspended',
+          suspendedAt: suspendedAt,
+        );
+        org = org.copyWith(orgStatus: 'suspended', orgSuspendedAt: suspendedAt);
+      }
+
       final members = await DatabaseService.getMembersForOrganization(org.id);
       final privs = await DatabaseService.getMemberPrivileges(
         userId: user.id,
@@ -159,7 +198,6 @@ class OrgNotifier extends StateNotifier<OrgState> {
         canViewReminders: canViewReminders,
         canViewHistory: canViewHistory,
       );
-      // Refresh members so UI reflects the change.
       await refreshMembers();
       return null;
     } catch (e) {
@@ -168,11 +206,21 @@ class OrgNotifier extends StateNotifier<OrgState> {
   }
 
   /// Create a new organization with the current user as admin.
-  Future<String?> createOrganization(String name) async {
+  ///
+  /// [licenseCount] — number of Business licenses purchased (admin counted as 1).
+  /// [orgPlanExpiresAt] — set after a successful Stripe payment from the screen.
+  ///
+  /// Returns null on success, or an error string.
+  Future<String?> createOrganization(
+    String name, {
+    required int licenseCount,
+    required DateTime orgPlanExpiresAt,
+  }) async {
     final user = StorageService.currentUser;
     if (user == null) return 'Aucun utilisateur connecté';
     if (name.trim().isEmpty) return "Le nom de l'organisation est obligatoire";
     if (user.organizationId != null) return 'Vous appartenez déjà à une organisation';
+    if (user.plan != 'business') return 'Le plan Business est requis pour créer une organisation';
 
     state = state.copyWith(isLoading: true, clearError: true);
     try {
@@ -182,6 +230,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
         name: name.trim(),
         ownerId: user.id,
         inviteCode: _generateInviteCode(),
+        licenseCount: licenseCount,
+        orgPlanExpiresAt: orgPlanExpiresAt,
       );
 
       await DatabaseService.insertOrganization(org);
@@ -211,6 +261,40 @@ class OrgNotifier extends StateNotifier<OrgState> {
     }
   }
 
+  /// Admin renews org licenses. Called from the screen after a successful Stripe payment.
+  ///
+  /// [licenseCount] must be ≥ current member count (active + suspended).
+  /// [expiresAt] — new expiry date derived from billing cycle.
+  Future<String?> renewOrgLicenses({
+    required int licenseCount,
+    required DateTime expiresAt,
+  }) async {
+    final user = StorageService.currentUser;
+    if (user == null) return 'Aucun utilisateur connecté';
+    if (user.orgRole != 'admin') return "Action réservée à l'administrateur";
+    final org = state.organization;
+    if (org == null) return 'Aucune organisation';
+
+    final currentCount = state.totalMemberCount;
+    if (licenseCount < currentCount) {
+      return 'Impossible de réduire en dessous du nombre de membres actuels ($currentCount)';
+    }
+
+    try {
+      await DatabaseService.updateOrgLicenses(org.id, licenseCount, expiresAt);
+      final updatedOrg = org.copyWith(
+        licenseCount: licenseCount,
+        orgPlanExpiresAt: expiresAt,
+        orgStatus: 'active',
+        clearOrgSuspendedAt: true,
+      );
+      state = state.copyWith(organization: updatedOrg);
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
   /// Join an existing organization via its invite code.
   Future<String?> joinByCode(String code) async {
     final user = StorageService.currentUser;
@@ -226,9 +310,22 @@ class OrgNotifier extends StateNotifier<OrgState> {
         return 'Code invalide ou organisation introuvable';
       }
 
+      // Block joining a suspended org.
+      if (org.isSuspended) {
+        state = state.copyWith(isLoading: false);
+        return 'Cette organisation est actuellement suspendue';
+      }
+
       if (await DatabaseService.isUserInOrganization(org.id, user.id)) {
         state = state.copyWith(isLoading: false, error: 'Vous êtes déjà membre de cette organisation');
         return 'Vous êtes déjà membre de cette organisation';
+      }
+
+      // Check license capacity (active + suspended members count toward total).
+      final currentMembers = await DatabaseService.getMembersForOrganization(org.id);
+      if (currentMembers.length >= org.licenseCount) {
+        state = state.copyWith(isLoading: false);
+        return "L'organisation n'a plus de places disponibles. L'administrateur doit acheter des licences supplémentaires.";
       }
 
       await DatabaseService.insertOrgMember(
@@ -238,9 +335,16 @@ class OrgNotifier extends StateNotifier<OrgState> {
         role: 'member',
       );
 
-      final updated = user.copyWith(organizationId: org.id, orgRole: 'member');
+      final updated = user.copyWith(
+        organizationId: org.id,
+        orgRole: 'member',
+        plan: 'business',
+        planExpiresAt: null,
+        subscriptionBillingCycle: null,
+      );
       await DatabaseService.updateUser(updated);
       await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
+      await scheduleBusinessSync();
 
       final members = await DatabaseService.getMembersForOrganization(org.id);
       final privs = await DatabaseService.getMemberPrivileges(userId: user.id, orgId: org.id);
@@ -268,12 +372,20 @@ class OrgNotifier extends StateNotifier<OrgState> {
     if (targetUserId == user.id) return "Utilisez \"Quitter l'organisation\" pour vous retirer";
 
     try {
-      // Only transfer non-duplicate contacts to admin. Duplicate contacts
-      // (same phone/email as another active member's contact) stay with the
-      // removed member so they can still see them as a solo user.
       await DatabaseService.transferNonDuplicateContactsToAdmin(
           fromUserId: targetUserId, orgId: org.id);
       await DatabaseService.removeOrgMember(org.id, targetUserId);
+
+      // Revoke Business plan from removed member.
+      final removedUser = await DatabaseService.findUserById(targetUserId);
+      if (removedUser != null) {
+        await DatabaseService.updateUser(removedUser.copyWith(
+          plan: 'free',
+          planExpiresAt: null,
+          subscriptionBillingCycle: null,
+        ));
+      }
+
       await refreshMembers();
       return null;
     } catch (e) {
@@ -298,20 +410,30 @@ class OrgNotifier extends StateNotifier<OrgState> {
 
       if (isLastAdmin && state.members.length <= 1) {
         await DatabaseService.deleteOrganization(org.id);
-        final refreshed = await DatabaseService.findUserById(user.id);
-        if (refreshed != null) {
-          await StorageService.setCurrentSession(refreshed, refreshed.sessionToken ?? '');
-        }
+        final downgraded = user.copyWith(
+          organizationId: null,
+          orgRole: null,
+          plan: 'free',
+          planExpiresAt: null,
+          subscriptionBillingCycle: null,
+        );
+        await DatabaseService.updateUser(downgraded);
+        await StorageService.setCurrentSession(downgraded, user.sessionToken ?? '');
+        await cancelBusinessSync();
       } else {
-        // Only transfer non-duplicate contacts to admin before leaving so they
-        // remain visible in the org workspace. Duplicate contacts stay with
-        // the departing member for their personal record.
         await DatabaseService.transferNonDuplicateContactsToAdmin(
             fromUserId: user.id, orgId: org.id);
         await DatabaseService.removeOrgMember(org.id, user.id);
-        final updated = user.copyWith(organizationId: null, orgRole: null);
+        final updated = user.copyWith(
+          organizationId: null,
+          orgRole: null,
+          plan: 'free',
+          planExpiresAt: null,
+          subscriptionBillingCycle: null,
+        );
         await DatabaseService.updateUser(updated);
         await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
+        await cancelBusinessSync();
       }
 
       state = const OrgState();
@@ -331,11 +453,34 @@ class OrgNotifier extends StateNotifier<OrgState> {
 
     state = state.copyWith(isLoading: true, clearError: true);
     try {
-      await DatabaseService.deleteOrganization(org.id);
-      final refreshed = await DatabaseService.findUserById(user.id);
-      if (refreshed != null) {
-        await StorageService.setCurrentSession(refreshed, refreshed.sessionToken ?? '');
+      // Downgrade all non-admin members to free before deleting.
+      final members = await DatabaseService.getMembersForOrganization(org.id);
+      for (final m in members) {
+        if (m.userId == user.id) continue; // admin handled below
+        final memberUser = await DatabaseService.findUserById(m.userId);
+        if (memberUser != null) {
+          await DatabaseService.updateUser(memberUser.copyWith(
+            plan: 'free',
+            planExpiresAt: null,
+            subscriptionBillingCycle: null,
+          ));
+        }
       }
+
+      await DatabaseService.deleteOrganization(org.id);
+
+      // Downgrade admin and clear their org fields.
+      final downgraded = user.copyWith(
+        organizationId: null,
+        orgRole: null,
+        plan: 'free',
+        planExpiresAt: null,
+        subscriptionBillingCycle: null,
+      );
+      await DatabaseService.updateUser(downgraded);
+      await StorageService.setCurrentSession(downgraded, user.sessionToken ?? '');
+      await cancelBusinessSync();
+
       state = const OrgState();
       return null;
     } catch (e) {
@@ -358,9 +503,6 @@ class OrgNotifier extends StateNotifier<OrgState> {
     );
     if (target.role == 'admin') return "Impossible de suspendre un administrateur";
     try {
-      // Only transfer non-duplicate contacts to admin. Contacts that are
-      // duplicates of an existing active member's contact stay with the
-      // suspended member so they can see them while suspended.
       await DatabaseService.transferNonDuplicateContactsToAdmin(
           fromUserId: targetUserId, orgId: org.id);
       await DatabaseService.updateMemberStatus(
@@ -373,6 +515,11 @@ class OrgNotifier extends StateNotifier<OrgState> {
   }
 
   /// Admin reactivates a suspended member.
+  ///
+  /// Checks that there is still a free seat before reactivating (the member
+  /// was suspended but still counted toward the license total, so this check
+  /// is not strictly needed, but it guards against edge-cases where licenses
+  /// were reduced after the suspension).
   Future<String?> reactivateMember(String targetUserId) async {
     final user = StorageService.currentUser;
     if (user == null) return 'Aucun utilisateur connecté';

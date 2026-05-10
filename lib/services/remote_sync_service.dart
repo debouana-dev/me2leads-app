@@ -351,6 +351,20 @@ class RemoteSyncService {
     await conn.execute(
       'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "subscription_billing_cycle" VARCHAR(10) DEFAULT NULL',
     );
+
+    // v17: org license count, expiry, and suspension tracking.
+    await conn.execute(
+      'ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "license_count" INTEGER NOT NULL DEFAULT 1',
+    );
+    await conn.execute(
+      'ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "org_plan_expires_at" VARCHAR(50) DEFAULT NULL',
+    );
+    await conn.execute(
+      "ALTER TABLE \"organizations\" ADD COLUMN IF NOT EXISTS \"org_status\" VARCHAR(20) NOT NULL DEFAULT 'active'",
+    );
+    await conn.execute(
+      'ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "org_suspended_at" VARCHAR(50) DEFAULT NULL',
+    );
   }
 
   // ── Cloud user helpers ───────────────────────────────────────────────────────
@@ -1297,10 +1311,18 @@ class RemoteSyncService {
       Connection conn, Map<String, dynamic> r) async {
     await conn.execute(
       Sql.named('''
-        INSERT INTO "organizations" (id,name,owner_id,invite_code,created_at)
-        VALUES (@id,@name,@owner_id,@invite_code,@created_at)
+        INSERT INTO "organizations"
+          (id,name,owner_id,invite_code,created_at,
+           license_count,org_plan_expires_at,org_status,org_suspended_at)
+        VALUES
+          (@id,@name,@owner_id,@invite_code,@created_at,
+           @license_count,@org_plan_expires_at,@org_status,@org_suspended_at)
         ON CONFLICT (id) DO UPDATE SET
-          name=EXCLUDED.name,invite_code=EXCLUDED.invite_code
+          name=EXCLUDED.name,invite_code=EXCLUDED.invite_code,
+          license_count=EXCLUDED.license_count,
+          org_plan_expires_at=EXCLUDED.org_plan_expires_at,
+          org_status=EXCLUDED.org_status,
+          org_suspended_at=EXCLUDED.org_suspended_at
       '''),
       parameters: {
         'id': r['id'],
@@ -1308,8 +1330,43 @@ class RemoteSyncService {
         'owner_id': r['owner_id'],
         'invite_code': r['invite_code'],
         'created_at': r['created_at'],
+        'license_count': r['license_count'] ?? 1,
+        'org_plan_expires_at': r['org_plan_expires_at'],
+        'org_status': r['org_status'] ?? 'active',
+        'org_suspended_at': r['org_suspended_at'],
       },
     );
+  }
+
+  /// Permanently deletes all cloud data for the given organization after the
+  /// 6-month suspension window has elapsed without renewal.
+  static Future<void> deleteOrganizationDataFromCloud(String orgId) async {
+    if (kIsWeb) return;
+    final conn = await _connect();
+    if (conn == null) return;
+    try {
+      await _ensureSchema(conn);
+      await conn.execute(
+        Sql.named(
+            'DELETE FROM "organization_members" WHERE "organization_id" = @id'),
+        parameters: {'id': orgId},
+      );
+      // Clear org membership fields on affected user rows
+      await conn.execute(
+        Sql.named(
+            'UPDATE "users" SET "organization_id" = NULL, "org_role" = NULL WHERE "organization_id" = @id'),
+        parameters: {'id': orgId},
+      );
+      await conn.execute(
+        Sql.named('DELETE FROM "organizations" WHERE "id" = @id'),
+        parameters: {'id': orgId},
+      );
+      debugPrint('RemoteSyncService: org $orgId permanently deleted from cloud');
+    } catch (e) {
+      debugPrint('RemoteSyncService.deleteOrganizationDataFromCloud: $e');
+    } finally {
+      await conn.close();
+    }
   }
 
   static Future<void> _upsertOrgMember(
