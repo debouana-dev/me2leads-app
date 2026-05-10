@@ -436,9 +436,15 @@ class RemoteSyncService {
   /// Returns `null` when there is no network, the server is unreachable,
   /// or an unexpected error prevents the lookup from completing.
   static Future<bool?> importUserByEmailLookup(String emailLookup) async {
-    if (kIsWeb) return null;
+    if (kIsWeb) {
+      return null;
+    }
     final connectivity = await Connectivity().checkConnectivity();
-    if (connectivity.contains(ConnectivityResult.none)) return null;
+    if (connectivity.contains(ConnectivityResult.none)) {
+      return null;
+    }
+    debugPrint(
+        'RemoteSyncService.importUserByEmailLookup: checking remote user for lookup $emailLookup');
     final conn = await _connect();
     if (conn == null) return null;
     try {
@@ -450,7 +456,13 @@ class RemoteSyncService {
         Sql.named('SELECT * FROM "users" WHERE "email_lookup" = @lookup'),
         parameters: {'lookup': emailLookup},
       );
-      if (result.isEmpty) return false;
+      if (result.isEmpty) {
+        debugPrint(
+            'RemoteSyncService.importUserByEmailLookup: no remote user found for lookup $emailLookup');
+        return false;
+      }
+      debugPrint(
+          'RemoteSyncService.importUserByEmailLookup: remote user found for lookup $emailLookup, upserting local row');
       final row = _normaliseBools(result.first.toColumnMap(), _userBoolCols);
       await DatabaseService.upsertRawRow('users', row);
       return true;
@@ -745,9 +757,13 @@ class RemoteSyncService {
     required String emailLookup,
     required String? sessionToken,
   }) async {
-    if (kIsWeb) return;
+    if (kIsWeb) {
+      return;
+    }
     final conn = await _connect();
-    if (conn == null) return;
+    if (conn == null) {
+      return;
+    }
     try {
       await conn.execute(
         Sql.named(

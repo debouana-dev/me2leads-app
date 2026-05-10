@@ -107,10 +107,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
     if (user == null) {
       // No local account — try the cloud database.
+      debugPrint(
+          'AuthNotifier.login: local user missing, attempting cloud import for lookup $lookup');
       final cloudResult =
           await RemoteSyncService.importUserByEmailLookup(lookup);
       if (cloudResult == null) {
-        // Server unreachable or connection error — cannot confirm account status.
+        debugPrint(
+            'AuthNotifier.login: cloud lookup failed for lookup $lookup');
         state = state.copyWith(
           isLoading: false,
           error: _l10n.authCloudConnectionError,
@@ -119,9 +122,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
       }
       if (cloudResult) {
         importedFromCloud = true;
+        debugPrint(
+            'AuthNotifier.login: cloud account found and imported for lookup $lookup');
         user = await DatabaseService.findUserByEmailLookup(lookup);
       }
       if (user == null) {
+        debugPrint(
+            'AuthNotifier.login: no account found in cloud for lookup $lookup');
         state = state.copyWith(
           isLoading: false,
           error: _l10n.authNoAccountForEmail,
@@ -189,6 +196,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
     // When the user record was pulled from the cloud, bring their data too.
     if (importedFromCloud) {
+      debugPrint(
+          'AuthNotifier.login: user imported from cloud, starting RemoteSyncService.pull for ${updated.id}');
       unawaited(RemoteSyncService.pull(updated.id));
     }
 
@@ -330,6 +339,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> signInWithGoogle() async {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
+      debugPrint('AuthNotifier.signInWithGoogle: starting Google sign-in flow');
       final google = GoogleSignIn(
           scopes: ['email'], serverClientId: dotenv.env['SERVERCLIENTID']);
       final account = await google.signIn();
@@ -337,6 +347,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         state = state.copyWith(isLoading: false);
         return false;
       }
+      debugPrint(
+          'AuthNotifier.signInWithGoogle: Google account retrieved (email: ${account.email})');
       return _upsertOAuthUser(
         email: account.email,
         firstName: account.displayName?.split(' ').first ?? 'User',
@@ -357,6 +369,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> signInWithApple() async {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
+      debugPrint('AuthNotifier.signInWithApple: starting Apple sign-in flow');
       final credential = await SignInWithApple.getAppleIDCredential(
         scopes: [
           AppleIDAuthorizationScopes.email,
@@ -371,6 +384,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         );
         return false;
       }
+      debugPrint(
+          'AuthNotifier.signInWithApple: Apple account retrieved (email: $email)');
       return _upsertOAuthUser(
         email: email,
         firstName: credential.givenName ?? 'User',
@@ -396,22 +411,47 @@ class AuthNotifier extends StateNotifier<AuthState> {
     await EncryptionService.initFromEnv(email);
 
     final lookup = _emailLookup(email);
+    debugPrint(
+        'AuthNotifier._upsertOAuthUser: checking local/remote OAuth account for provider=$provider, lookup=$lookup');
     var user = await DatabaseService.findUserByEmailLookup(lookup);
     final token = EncryptionService.generateSessionToken();
 
     if (user == null) {
-      user = UserAccount(
-        id: _uuid.v4(),
-        email: email,
-        firstName: firstName,
-        lastName: lastName,
-        passwordHash: '',
-        authProvider: provider,
-        sessionToken: token,
-        lastLoginAt: DateTime.now(),
-      );
-      await DatabaseService.insertUser(user);
+      debugPrint(
+          'AuthNotifier._upsertOAuthUser: no local account found, attempting cloud import for $provider');
+      // Try to import from cloud
+      final cloudResult =
+          await RemoteSyncService.importUserByEmailLookup(lookup);
+      if (cloudResult == true) {
+        debugPrint(
+            'AuthNotifier._upsertOAuthUser: cloud account found and imported for $provider');
+        user = await DatabaseService.findUserByEmailLookup(lookup);
+      } else if (cloudResult == false) {
+        debugPrint(
+            'AuthNotifier._upsertOAuthUser: no cloud account found, creating new $provider account');
+      } else {
+        debugPrint(
+            'AuthNotifier._upsertOAuthUser: cloud lookup failed (no connection), proceeding with local creation for $provider');
+      }
+
+      if (user == null) {
+        user = UserAccount(
+          id: _uuid.v4(),
+          email: email,
+          firstName: firstName,
+          lastName: lastName,
+          passwordHash: '',
+          authProvider: provider,
+          sessionToken: token,
+          lastLoginAt: DateTime.now(),
+        );
+        await DatabaseService.insertUser(user);
+        debugPrint(
+            'AuthNotifier._upsertOAuthUser: new $provider account created with id=${user.id}');
+      }
     } else {
+      debugPrint(
+          'AuthNotifier._upsertOAuthUser: existing local account found (id=${user.id}, provider=${user.authProvider})');
       if (user.authProvider != provider) {
         state = state.copyWith(
           isLoading: false,
@@ -520,8 +560,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
             userId,
             includeContacts: false,
           );
-          if (cloudErr != null)
+          if (cloudErr != null) {
             debugPrint('deleteAccount cloud error: $cloudErr');
+          }
           await DatabaseService.deleteUserAndAllData(userId);
           await StorageService.clearSession();
           state = const AuthState();
@@ -751,10 +792,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // No local account — try the cloud database.
       final cloudResult =
           await RemoteSyncService.importUserByEmailLookup(lookup);
-      if (cloudResult == null) return _l10n.authCloudConnectionError;
-      if (cloudResult)
+      if (cloudResult == null) {
+        return _l10n.authCloudConnectionError;
+      }
+      if (cloudResult) {
         user = await DatabaseService.findUserByEmailLookup(lookup);
-      if (user == null) return _l10n.authNoAccountForEmailRecovery;
+      }
+      if (user == null) {
+        return _l10n.authNoAccountForEmailRecovery;
+      }
     }
 
     if (user.authProvider != 'email') {
