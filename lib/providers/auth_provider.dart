@@ -234,6 +234,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
       requiresEmailVerification: false,
     );
 
+    if (await StorageService.getEffectivePlan() == 'business') {
+      await scheduleBusinessSync();
+    }
+
     // When the user record was pulled from the cloud, bring their data too.
     if (importedFromCloud) {
       debugPrint(

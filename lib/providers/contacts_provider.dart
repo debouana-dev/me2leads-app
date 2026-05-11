@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -104,8 +105,15 @@ class ContactsState {
 
 class ContactsNotifier extends StateNotifier<ContactsState> {
   ContactsNotifier() : super(const ContactsState()) {
-    _loadContacts();
+    _loadContacts().then((_) async {
+      _lastSyncAt = await DatabaseService.getUserLastSync(_ownerId);
+      _syncCheckTimer = Timer.periodic(
+          const Duration(seconds: 30), (_) => _checkForSyncUpdate());
+    });
   }
+
+  Timer? _syncCheckTimer;
+  String? _lastSyncAt;
 
   String get _ownerId => StorageService.currentUserId;
 
@@ -550,6 +558,21 @@ class ContactsNotifier extends StateNotifier<ContactsState> {
 
   Future<List<Interaction>> getInteractions(String contactId) {
     return DatabaseService.getInteractionsForContact(contactId);
+  }
+
+  Future<void> _checkForSyncUpdate() async {
+    if (_ownerId.isEmpty) return;
+    final currentSyncAt = await DatabaseService.getUserLastSync(_ownerId);
+    if (currentSyncAt != null && currentSyncAt != _lastSyncAt) {
+      _lastSyncAt = currentSyncAt;
+      await _loadContacts();
+    }
+  }
+
+  @override
+  void dispose() {
+    _syncCheckTimer?.cancel();
+    super.dispose();
   }
 }
 
