@@ -8,6 +8,7 @@ import '../../core/theme/app_colors.dart';
 import '../../models/user_account.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
+import '../../providers/organization_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/database_service.dart';
 import '../../services/storage_service.dart';
@@ -31,6 +32,27 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
   static const _uuid = Uuid();
 
   bool get _stripeReady => AppConfig.stripePublishableKey.isNotEmpty;
+
+  int _planLevel(String plan) {
+    switch (plan) {
+      case 'free':
+        return 0;
+      case 'premium':
+        return 1;
+      case 'business':
+        return 2;
+      default:
+        return 0;
+    }
+  }
+
+  DateTime? _renewalWindowStart(DateTime? planExpiresAt, String? billingCycle) {
+    if (planExpiresAt == null) return null;
+    final windowDays = billingCycle == 'yearly'
+        ? SubscriptionService.yearlyRenewalWindowDays
+        : SubscriptionService.monthlyRenewalWindowDays;
+    return planExpiresAt.subtract(Duration(days: windowDays));
+  }
 
   @override
   void initState() {
@@ -105,6 +127,57 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
 
   Future<void> _selectPlan(String planId) async {
     final l10n = ref.read(l10nProvider);
+    final authState = ref.read(authProvider);
+    final currentPlan = authState.plan;
+    final planExpiresAt = authState.planExpiresAt;
+    final billingCycle = authState.subscriptionBillingCycle;
+    final isInRenewalWindow = currentPlan != 'free' &&
+        SubscriptionService.isInRenewalWindow(planExpiresAt, billingCycle);
+
+    // Check if user is in an organization
+    final orgState = ref.read(organizationProvider);
+    if (orgState.organization != null) {
+      _showSnack(l10n.planChangeDisabledInOrg, AppColors.warning);
+      return;
+    }
+
+    // Check if downgrade and not in renewal window
+    if (_planLevel(planId) < _planLevel(currentPlan) && planId != 'free') {
+      if (!isInRenewalWindow) {
+        final renewalStart = _renewalWindowStart(planExpiresAt, billingCycle);
+        if (renewalStart != null) {
+          final formattedDate =
+              '${renewalStart.day.toString().padLeft(2, '0')}/${renewalStart.month.toString().padLeft(2, '0')}/${renewalStart.year}';
+          _showSnack(
+              l10n.downgradeNotAllowed(formattedDate), AppColors.warning);
+        } else {
+          _showSnack(l10n.downgradeNotAllowedGeneric, AppColors.warning);
+        }
+        return;
+      }
+    }
+
+    // Confirmation for switching to free (cancellation)
+    if (planId == 'free' && currentPlan != 'free') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(l10n.cancelSubscriptionTitle),
+          content: Text(l10n.cancelSubscriptionMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(l10n.cancelAction),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(l10n.confirm),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
 
     // Free plan — no payment required.
     if (planId == 'free') {
@@ -189,6 +262,7 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
     final currency = ref.watch(settingsProvider).currency;
     final eurToUsd = ref.watch(eurToUsdRateProvider);
     final authState = ref.watch(authProvider);
+    final orgState = ref.watch(organizationProvider);
     final currentPlan = authState.plan;
     final planExpiresAt = authState.planExpiresAt;
     final billingCycle = authState.subscriptionBillingCycle;
@@ -197,6 +271,9 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
     // Renewal window: 5 days for monthly, 7 days for yearly.
     final isInRenewalWindow = currentPlan != 'free' &&
         SubscriptionService.isInRenewalWindow(planExpiresAt, billingCycle);
+
+    // Check if user is in an organization
+    final isInOrganization = orgState.organization != null;
 
     // Format expiry date for display.
     String? expiryText;
@@ -291,7 +368,7 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
                     isPopular: false,
                     isCurrent: currentPlan == 'free',
                     isLoading: _loadingPlan == 'free',
-                    onSelect: currentPlan == 'free'
+                    onSelect: (currentPlan == 'free' || isInOrganization)
                         ? null
                         : () => _selectPlan('free'),
                     l10n: l10n,
@@ -316,9 +393,8 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
                     isRenewable: currentPlan == 'premium' && isInRenewalWindow,
                     expiryText: currentPlan == 'premium' ? expiryText : null,
                     isLoading: _loadingPlan == 'premium',
-                    onSelect: currentPlan == 'premium' && !isInRenewalWindow
-                        ? null
-                        : () => _selectPlan('premium'),
+                    onSelect:
+                        isInOrganization ? null : () => _selectPlan('premium'),
                     renewLabel: l10n.renewAction,
                     l10n: l10n,
                   ),
@@ -342,9 +418,8 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
                     isRenewable: currentPlan == 'business' && isInRenewalWindow,
                     expiryText: currentPlan == 'business' ? expiryText : null,
                     isLoading: _loadingPlan == 'business',
-                    onSelect: currentPlan == 'business' && !isInRenewalWindow
-                        ? null
-                        : () => _selectPlan('business'),
+                    onSelect:
+                        isInOrganization ? null : () => _selectPlan('business'),
                     renewLabel: l10n.renewAction,
                     l10n: l10n,
                   ),

@@ -18,6 +18,7 @@ import '../../services/database_service.dart';
 import '../../services/photo_storage_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/stripe_service.dart';
+import '../../services/subscription_service.dart';
 
 const _renewalUuid = Uuid();
 
@@ -318,6 +319,45 @@ class _OrganizationAdminScreenState
     }
   }
 
+  Future<String?> _fetchOrgBillingCycle() async {
+    final userId = StorageService.currentUserId;
+    final history = await DatabaseService.getPaymentHistory(userId);
+    for (final record in history) {
+      if (record.plan == 'business' && record.status == 'succeeded') {
+        return record.billingCycle;
+      }
+    }
+    return null;
+  }
+
+  int _calculateOrgLicensePaymentAmountInCents({
+    required int currentLicenseCount,
+    required int requestedLicenseCount,
+    required String billingCycle,
+    required DateTime? expiresAt,
+  }) {
+    final unitAmountCents = billingCycle == 'yearly'
+        ? (_unitYearly * 100).round()
+        : (_unitMonthly * 100).round();
+    final addedSeats = requestedLicenseCount - currentLicenseCount;
+    if (addedSeats <= 0) {
+      return unitAmountCents * requestedLicenseCount;
+    }
+
+    if (expiresAt == null) {
+      return unitAmountCents * addedSeats;
+    }
+
+    final remainingDays = expiresAt.difference(DateTime.now()).inDays;
+    if (remainingDays <= 0) {
+      return unitAmountCents * addedSeats;
+    }
+
+    final totalDays = billingCycle == 'yearly' ? 365 : 30;
+    final prorated = unitAmountCents * addedSeats * remainingDays / totalDays;
+    return prorated.round().clamp(1, double.maxFinite).toInt();
+  }
+
   // ─── License renewal ─────────────────────────────────────────────────────
 
   /// Shows a bottom sheet where the admin selects billing cycle and confirms
@@ -332,7 +372,10 @@ class _OrganizationAdminScreenState
     // Must pay for at least the current member count.
     final minLicenses = orgState.totalMemberCount;
 
-    String? billingCycle = 'monthly';
+    final existingBillingCycle = await _fetchOrgBillingCycle();
+    if (!mounted) return;
+
+    String? billingCycle = existingBillingCycle ?? 'monthly';
     int licenseCount = minLicenses < 1 ? 1 : minLicenses;
 
     final confirmed = await showModalBottomSheet<bool>(
@@ -345,6 +388,8 @@ class _OrganizationAdminScreenState
       builder: (ctx) => _RenewalSheet(
         initialLicenses: licenseCount,
         minLicenses: minLicenses,
+        initialBillingCycle: billingCycle!,
+        allowedBillingCycle: existingBillingCycle,
         onConfirm: (cycle, count) {
           billingCycle = cycle;
           licenseCount = count;
@@ -359,10 +404,36 @@ class _OrganizationAdminScreenState
     final user = StorageService.currentUser;
     if (user == null) return;
 
+    final isRenewal = licenseCount == org.licenseCount;
+    final isInRenewalWindow = SubscriptionService.isInRenewalWindow(
+      org.orgPlanExpiresAt,
+      billingCycle,
+    );
+
+    if (isRenewal && !isInRenewalWindow) {
+      final renewalStart = SubscriptionService.renewalWindowStart(
+          org.orgPlanExpiresAt, billingCycle);
+      if (renewalStart != null) {
+        final formattedDate =
+            '${renewalStart.day.toString().padLeft(2, '0')}/${renewalStart.month.toString().padLeft(2, '0')}/${renewalStart.year}';
+        _showSnack(l10n.orgRenewalWindowNotOpen(formattedDate), error: true);
+      } else {
+        _showSnack(l10n.orgRenewalWindowNotOpenGeneric, error: true);
+      }
+      return;
+    }
+
     if (!AppConfig.stripePublishableKey.isNotEmpty) {
       _showSnack('Stripe not configured', error: true);
       return;
     }
+
+    final amountToPayCents = _calculateOrgLicensePaymentAmountInCents(
+      currentLicenseCount: org.licenseCount,
+      requestedLicenseCount: licenseCount,
+      billingCycle: billingCycle!,
+      expiresAt: org.orgPlanExpiresAt,
+    );
 
     setState(() {});
     final result = await StripeService.startCheckout(
@@ -370,6 +441,7 @@ class _OrganizationAdminScreenState
       billingCycle: billingCycle!,
       userEmail: user.email,
       licenseCount: licenseCount,
+      amount: amountToPayCents.toDouble(),
     );
 
     if (!mounted) return;
@@ -382,8 +454,7 @@ class _OrganizationAdminScreenState
       return;
     }
 
-    // Record payment for the full org license pool, including the admin seat.
-    final unitPrice = billingCycle == 'yearly' ? _unitYearly : _unitMonthly;
+    // Record payment for the org license pool, including the admin seat.
     final record = PaymentRecord(
       id: result.paymentIntentId?.isNotEmpty == true
           ? result.paymentIntentId!
@@ -391,7 +462,7 @@ class _OrganizationAdminScreenState
       userId: user.id,
       plan: 'business',
       billingCycle: billingCycle!,
-      amount: unitPrice * licenseCount,
+      amount: amountToPayCents / 100,
       currency: 'EUR',
       status: 'succeeded',
       stripePaymentIntentId: result.paymentIntentId ?? '',
@@ -399,9 +470,12 @@ class _OrganizationAdminScreenState
     );
     await DatabaseService.insertPaymentRecord(record);
 
-    final expiresAt = billingCycle == 'yearly'
-        ? DateTime.now().add(const Duration(days: 365))
-        : DateTime.now().add(const Duration(days: 30));
+    final shouldRenewExpiry = isRenewal;
+    final expiresAt = shouldRenewExpiry
+        ? (billingCycle == 'yearly'
+            ? DateTime.now().add(const Duration(days: 365))
+            : DateTime.now().add(const Duration(days: 30)))
+        : org.orgPlanExpiresAt;
 
     final err = await ref.read(organizationProvider.notifier).renewOrgLicenses(
           licenseCount: licenseCount,
@@ -1515,12 +1589,16 @@ class _RenewalSheet extends StatefulWidget {
   const _RenewalSheet({
     required this.initialLicenses,
     required this.minLicenses,
+    required this.initialBillingCycle,
+    this.allowedBillingCycle,
     required this.onConfirm,
     required this.l10n,
   });
 
   final int initialLicenses;
   final int minLicenses;
+  final String initialBillingCycle;
+  final String? allowedBillingCycle;
   final void Function(String billingCycle, int licenseCount) onConfirm;
   final AppL10n l10n;
 
@@ -1530,7 +1608,7 @@ class _RenewalSheet extends StatefulWidget {
 
 class _RenewalSheetState extends State<_RenewalSheet> {
   late int _licenseCount;
-  String _billingCycle = 'monthly';
+  late String _billingCycle;
 
   double get _unitPrice =>
       _billingCycle == 'yearly' ? _unitYearly : _unitMonthly;
@@ -1540,6 +1618,7 @@ class _RenewalSheetState extends State<_RenewalSheet> {
   void initState() {
     super.initState();
     _licenseCount = widget.initialLicenses < 1 ? 1 : widget.initialLicenses;
+    _billingCycle = widget.initialBillingCycle;
   }
 
   String _fmt(double v) => '${v.toStringAsFixed(2).replaceAll('.', ',')} €';
@@ -1603,12 +1682,26 @@ class _RenewalSheetState extends State<_RenewalSheet> {
                 _CyclePill(
                   label: l10n.orgMonthly,
                   selected: _billingCycle == 'monthly',
-                  onTap: () => setState(() => _billingCycle = 'monthly'),
+                  onTap: widget.allowedBillingCycle == null ||
+                          _licenseCount == widget.initialLicenses ||
+                          widget.allowedBillingCycle == 'monthly'
+                      ? () => setState(() => _billingCycle = 'monthly')
+                      : null,
+                  disabled: widget.allowedBillingCycle != null &&
+                      _licenseCount > widget.initialLicenses &&
+                      widget.allowedBillingCycle != 'monthly',
                 ),
                 _CyclePill(
                   label: l10n.orgYearly,
                   selected: _billingCycle == 'yearly',
-                  onTap: () => setState(() => _billingCycle = 'yearly'),
+                  onTap: widget.allowedBillingCycle == null ||
+                          _licenseCount == widget.initialLicenses ||
+                          widget.allowedBillingCycle == 'yearly'
+                      ? () => setState(() => _billingCycle = 'yearly')
+                      : null,
+                  disabled: widget.allowedBillingCycle != null &&
+                      _licenseCount > widget.initialLicenses &&
+                      widget.allowedBillingCycle != 'yearly',
                 ),
               ],
             ),
@@ -1647,7 +1740,16 @@ class _RenewalSheetState extends State<_RenewalSheet> {
                 ),
               ),
               IconButton(
-                onPressed: () => setState(() => _licenseCount++),
+                onPressed: () {
+                  setState(() {
+                    _licenseCount++;
+                    if (widget.allowedBillingCycle != null &&
+                        _licenseCount > widget.initialLicenses &&
+                        _billingCycle != widget.allowedBillingCycle) {
+                      _billingCycle = widget.allowedBillingCycle!;
+                    }
+                  });
+                },
                 icon: const Icon(
                   Icons.add_circle_outline_rounded,
                   color: AppColors.primary,
@@ -1713,24 +1815,30 @@ class _CyclePill extends StatelessWidget {
   const _CyclePill({
     required this.label,
     required this.selected,
-    required this.onTap,
+    this.onTap,
+    this.disabled = false,
   });
 
   final String label;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool disabled;
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
       child: GestureDetector(
-        onTap: onTap,
+        onTap: disabled ? null : onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           margin: const EdgeInsets.all(4),
           padding: const EdgeInsets.symmetric(vertical: 9),
           decoration: BoxDecoration(
-            color: selected ? AppColors.primary : Colors.transparent,
+            color: selected
+                ? AppColors.primary
+                : disabled
+                    ? AppColors.borderColor(context)
+                    : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
@@ -1739,7 +1847,11 @@ class _CyclePill extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : AppColors.secondary(context),
+              color: selected
+                  ? Colors.white
+                  : disabled
+                      ? AppColors.hint(context)
+                      : AppColors.secondary(context),
             ),
           ),
         ),

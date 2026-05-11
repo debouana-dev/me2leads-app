@@ -17,10 +17,12 @@ class OrgState {
   final bool isLoading;
   final String? error;
   // Current user's privileges (populated in loadForCurrentUser).
-  final bool currentUserCanEdit;         // can edit any org member's contacts
-  final bool currentUserCanCreate;       // can create new contacts
-  final bool currentUserCanViewReminders; // can view reminders on shared contacts
-  final bool currentUserCanViewHistory;  // can view history authored by other members
+  final bool currentUserCanEdit; // can edit any org member's contacts
+  final bool currentUserCanCreate; // can create new contacts
+  final bool
+      currentUserCanViewReminders; // can view reminders on shared contacts
+  final bool
+      currentUserCanViewHistory; // can view history authored by other members
   // Deduplicated total contact count for the org (excludes hidden duplicates).
   final int uniqueContactCount;
 
@@ -91,7 +93,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
     }
     state = state.copyWith(isLoading: true, clearError: true);
     try {
-      var org = await DatabaseService.findOrganizationById(user.organizationId!);
+      var org =
+          await DatabaseService.findOrganizationById(user.organizationId!);
       if (org == null) {
         state = const OrgState();
         return;
@@ -164,7 +167,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
           currentUserCanViewHistory: privs.canViewHistory,
         );
       } else {
-        state = state.copyWith(members: members, uniqueContactCount: uniqueCount);
+        state =
+            state.copyWith(members: members, uniqueContactCount: uniqueCount);
       }
     } catch (_) {}
   }
@@ -187,7 +191,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
       (m) => m.userId == userId,
       orElse: () => throw Exception('Membre introuvable'),
     );
-    if (target.role == 'admin') return "Les droits de l'administrateur ne peuvent pas être modifiés";
+    if (target.role == 'admin')
+      return "Les droits de l'administrateur ne peuvent pas être modifiés";
 
     try {
       await DatabaseService.updateMemberPrivileges(
@@ -219,8 +224,10 @@ class OrgNotifier extends StateNotifier<OrgState> {
     final user = StorageService.currentUser;
     if (user == null) return 'Aucun utilisateur connecté';
     if (name.trim().isEmpty) return "Le nom de l'organisation est obligatoire";
-    if (user.organizationId != null) return 'Vous appartenez déjà à une organisation';
-    if (user.plan != 'business') return 'Le plan Business est requis pour créer une organisation';
+    if (user.organizationId != null)
+      return 'Vous appartenez déjà à une organisation';
+    if (user.plan != 'business')
+      return 'Le plan Business est requis pour créer une organisation';
 
     state = state.copyWith(isLoading: true, clearError: true);
     try {
@@ -261,13 +268,13 @@ class OrgNotifier extends StateNotifier<OrgState> {
     }
   }
 
-  /// Admin renews org licenses. Called from the screen after a successful Stripe payment.
+  /// Admin updates org licenses after a successful Stripe payment.
   ///
   /// [licenseCount] must be ≥ current member count (active + suspended).
-  /// [expiresAt] — new expiry date derived from billing cycle.
+  /// [expiresAt] is optional. If null, the existing org expiry is preserved.
   Future<String?> renewOrgLicenses({
     required int licenseCount,
-    required DateTime expiresAt,
+    DateTime? expiresAt,
   }) async {
     final user = StorageService.currentUser;
     if (user == null) return 'Aucun utilisateur connecté';
@@ -281,12 +288,16 @@ class OrgNotifier extends StateNotifier<OrgState> {
     }
 
     try {
-      await DatabaseService.updateOrgLicenses(org.id, licenseCount, expiresAt);
+      await DatabaseService.updateOrgLicenses(
+        org.id,
+        licenseCount,
+        expiresAt: expiresAt,
+      );
       final updatedOrg = org.copyWith(
         licenseCount: licenseCount,
-        orgPlanExpiresAt: expiresAt,
-        orgStatus: 'active',
-        clearOrgSuspendedAt: true,
+        orgPlanExpiresAt: expiresAt ?? org.orgPlanExpiresAt,
+        orgStatus: expiresAt != null ? 'active' : org.orgStatus,
+        clearOrgSuspendedAt: expiresAt != null,
       );
       state = state.copyWith(organization: updatedOrg);
       return null;
@@ -300,13 +311,17 @@ class OrgNotifier extends StateNotifier<OrgState> {
     final user = StorageService.currentUser;
     if (user == null) return 'Aucun utilisateur connecté';
     if (code.trim().isEmpty) return "Le code d'invitation est obligatoire";
-    if (user.organizationId != null) return 'Vous appartenez déjà à une organisation';
+    if (user.organizationId != null)
+      return 'Vous appartenez déjà à une organisation';
 
     state = state.copyWith(isLoading: true, clearError: true);
     try {
-      final org = await DatabaseService.findOrganizationByInviteCode(code.trim());
+      final org =
+          await DatabaseService.findOrganizationByInviteCode(code.trim());
       if (org == null) {
-        state = state.copyWith(isLoading: false, error: 'Code invalide ou organisation introuvable');
+        state = state.copyWith(
+            isLoading: false,
+            error: 'Code invalide ou organisation introuvable');
         return 'Code invalide ou organisation introuvable';
       }
 
@@ -317,12 +332,15 @@ class OrgNotifier extends StateNotifier<OrgState> {
       }
 
       if (await DatabaseService.isUserInOrganization(org.id, user.id)) {
-        state = state.copyWith(isLoading: false, error: 'Vous êtes déjà membre de cette organisation');
+        state = state.copyWith(
+            isLoading: false,
+            error: 'Vous êtes déjà membre de cette organisation');
         return 'Vous êtes déjà membre de cette organisation';
       }
 
       // Check license capacity (active + suspended members count toward total).
-      final currentMembers = await DatabaseService.getMembersForOrganization(org.id);
+      final currentMembers =
+          await DatabaseService.getMembersForOrganization(org.id);
       if (currentMembers.length >= org.licenseCount) {
         state = state.copyWith(isLoading: false);
         return "L'organisation n'a plus de places disponibles. L'administrateur doit acheter des licences supplémentaires.";
@@ -347,7 +365,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
       await scheduleBusinessSync();
 
       final members = await DatabaseService.getMembersForOrganization(org.id);
-      final privs = await DatabaseService.getMemberPrivileges(userId: user.id, orgId: org.id);
+      final privs = await DatabaseService.getMemberPrivileges(
+          userId: user.id, orgId: org.id);
       state = state.copyWith(
         isLoading: false,
         organization: org,
@@ -369,7 +388,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
     if (user.orgRole != 'admin') return "Action réservée à l'administrateur";
     final org = state.organization;
     if (org == null) return 'Aucune organisation';
-    if (targetUserId == user.id) return "Utilisez \"Quitter l'organisation\" pour vous retirer";
+    if (targetUserId == user.id)
+      return "Utilisez \"Quitter l'organisation\" pour vous retirer";
 
     try {
       await DatabaseService.transferNonDuplicateContactsToAdmin(
@@ -401,8 +421,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
     if (org == null) return 'Aucune organisation';
 
     try {
-      final isLastAdmin =
-          user.orgRole == 'admin' && state.members.where((m) => m.role == 'admin').length == 1;
+      final isLastAdmin = user.orgRole == 'admin' &&
+          state.members.where((m) => m.role == 'admin').length == 1;
 
       if (isLastAdmin && state.members.length > 1) {
         return "Transférez l'administration avant de quitter, ou supprimez l'organisation.";
@@ -418,7 +438,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
           subscriptionBillingCycle: null,
         );
         await DatabaseService.updateUser(downgraded);
-        await StorageService.setCurrentSession(downgraded, user.sessionToken ?? '');
+        await StorageService.setCurrentSession(
+            downgraded, user.sessionToken ?? '');
         await cancelBusinessSync();
       } else {
         await DatabaseService.transferNonDuplicateContactsToAdmin(
@@ -432,7 +453,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
           subscriptionBillingCycle: null,
         );
         await DatabaseService.updateUser(updated);
-        await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
+        await StorageService.setCurrentSession(
+            updated, user.sessionToken ?? '');
         await cancelBusinessSync();
       }
 
@@ -478,7 +500,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
         subscriptionBillingCycle: null,
       );
       await DatabaseService.updateUser(downgraded);
-      await StorageService.setCurrentSession(downgraded, user.sessionToken ?? '');
+      await StorageService.setCurrentSession(
+          downgraded, user.sessionToken ?? '');
       await cancelBusinessSync();
 
       state = const OrgState();
@@ -496,12 +519,14 @@ class OrgNotifier extends StateNotifier<OrgState> {
     if (user.orgRole != 'admin') return "Action réservée à l'administrateur";
     final org = state.organization;
     if (org == null) return 'Aucune organisation';
-    if (targetUserId == user.id) return 'Vous ne pouvez pas vous suspendre vous-même';
+    if (targetUserId == user.id)
+      return 'Vous ne pouvez pas vous suspendre vous-même';
     final target = state.members.firstWhere(
       (m) => m.userId == targetUserId,
       orElse: () => throw Exception('Membre introuvable'),
     );
-    if (target.role == 'admin') return "Impossible de suspendre un administrateur";
+    if (target.role == 'admin')
+      return "Impossible de suspendre un administrateur";
     try {
       await DatabaseService.transferNonDuplicateContactsToAdmin(
           fromUserId: targetUserId, orgId: org.id);
@@ -580,7 +605,8 @@ class OrgNotifier extends StateNotifier<OrgState> {
   }
 }
 
-final organizationProvider = StateNotifierProvider<OrgNotifier, OrgState>((ref) {
+final organizationProvider =
+    StateNotifierProvider<OrgNotifier, OrgState>((ref) {
   return OrgNotifier();
 });
 
@@ -599,12 +625,14 @@ final orgCanEditOthersProvider = Provider<bool>((ref) {
 
 final orgCanViewRemindersProvider = Provider<bool>((ref) {
   final user = StorageService.currentUser;
-  if (user?.organizationId == null) return true; // solo: always sees own reminders
+  if (user?.organizationId == null)
+    return true; // solo: always sees own reminders
   return ref.watch(organizationProvider).currentUserCanViewReminders;
 });
 
 final orgCanViewHistoryProvider = Provider<bool>((ref) {
   final user = StorageService.currentUser;
-  if (user?.organizationId == null) return true; // solo: always sees own history
+  if (user?.organizationId == null)
+    return true; // solo: always sees own history
   return ref.watch(organizationProvider).currentUserCanViewHistory;
 });

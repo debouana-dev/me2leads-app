@@ -166,7 +166,8 @@ class PricingScreen extends ConsumerWidget {
                                       const SizedBox(width: 4),
                                       Flexible(
                                         child: Text(
-                                          l10n.subscriptionExpiresOn(formatted),
+                                          l10n.subscriptionExpiresOn2(
+                                              formatted),
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             fontSize: 11,

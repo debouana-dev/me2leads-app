@@ -581,6 +581,22 @@ class AppL10n {
       _en ? 'Plan updated successfully' : 'Forfait mis à jour avec succès';
   String get planChangeError =>
       _en ? 'Error changing plan' : 'Erreur lors du changement de forfait';
+  String downgradeNotAllowed(String date) => _en
+      ? 'You can downgrade your plan starting from $date'
+      : 'Vous pouvez rétrograder votre forfait à partir du $date';
+  String get downgradeNotAllowedGeneric => _en
+      ? 'You can only downgrade during the renewal window'
+      : 'Vous ne pouvez rétrograder que pendant la fenêtre de renouvellement';
+  String get planChangeDisabledInOrg => _en
+      ? 'Subscription changes are disabled while in an organization. Leave the organization first.'
+      : 'Les changements d\'abonnement sont désactivés tant que vous êtes dans une organisation. Quittez d\'abord l\'organisation.';
+  String get cancelSubscriptionTitle =>
+      _en ? 'Cancel Subscription' : 'Annuler l\'abonnement';
+  String get cancelSubscriptionMessage => _en
+      ? 'Are you sure you want to cancel your subscription and switch to the Free plan? You will lose access to premium features.'
+      : 'Êtes-vous sûr de vouloir annuler votre abonnement et passer au plan Gratuit ? Vous perdrez l\'accès aux fonctionnalités premium.';
+  String get cancelAction => _en ? 'Cancel' : 'Annuler';
+  String get confirm => _en ? 'Confirm' : 'Confirmer';
   String get bankCard => _en ? 'Bank card' : 'Carte bancaire';
 
   // ─── Payment History ─────────────────────────────────────────────────────
@@ -853,6 +869,12 @@ class AppL10n {
   String get orgCannotReduceBelow => _en
       ? 'Cannot reduce below current member count'
       : 'Impossible de réduire en dessous du nombre de membres actuels';
+  String orgRenewalWindowNotOpen(String date) => _en
+      ? 'Organization license renewal starts on $date. You can still purchase additional licenses at any time.'
+      : 'Le renouvellement des licences d\'organisation commence le $date. Vous pouvez toujours acheter des licences supplémentaires à tout moment.';
+  String get orgRenewalWindowNotOpenGeneric => _en
+      ? 'Organization license renewal is only available during the renewal window.'
+      : 'Le renouvellement des licences d\'organisation est uniquement disponible pendant la fenêtre de renouvellement.';
 
   // ─── Import / Export ─────────────────────────────────────────────────────
   String get importExportTitle => _en ? 'Import / Export' : 'Import / Export';
@@ -1090,6 +1112,8 @@ class AppL10n {
   // ─── Subscription expiry & renewal ────────────────────────────────────────
   String subscriptionExpiresOn(String date) =>
       _en ? 'Expires on $date' : 'Expire le $date';
+  String subscriptionExpiresOn2(String date) =>
+      _en ? 'Exp: $date' : 'Exp: $date';
   String get subscriptionExpired =>
       _en ? 'Subscription expired' : 'Abonnement expiré';
   String get renewSubscription =>

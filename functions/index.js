@@ -46,7 +46,17 @@ exports.createPaymentIntent = onCall(
       throw new HttpsError('invalid-argument', 'licenseCount must be an integer >= 1');
     }
 
-    const amount = PRICES[plan][billingCycle] * licenseCount;
+    const rawAmount = request.data.amount;
+    let amount;
+    if (rawAmount != null) {
+      const parsedAmount = Number(rawAmount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount < 1) {
+        throw new HttpsError('invalid-argument', 'amount must be a number >= 1');
+      }
+      amount = Math.round(parsedAmount);
+    } else {
+      amount = PRICES[plan][billingCycle] * licenseCount;
+    }
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount,

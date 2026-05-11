@@ -50,8 +50,7 @@ class SubscriptionService {
         subscriptionBillingCycle: null,
       );
       await DatabaseService.updateUser(updated);
-      await StorageService.setCurrentSession(
-          updated, user.sessionToken ?? '');
+      await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
       await NotificationService.cancelSubscriptionRenewalNotifications(user.id);
       return true;
     }
@@ -67,5 +66,14 @@ class SubscriptionService {
         : monthlyRenewalWindowDays;
     final daysLeft = planExpiresAt.difference(DateTime.now()).inDays;
     return daysLeft <= windowDays;
+  }
+
+  static DateTime? renewalWindowStart(
+      DateTime? planExpiresAt, String? billingCycle) {
+    if (planExpiresAt == null) return null;
+    final windowDays = billingCycle == 'yearly'
+        ? yearlyRenewalWindowDays
+        : monthlyRenewalWindowDays;
+    return planExpiresAt.subtract(Duration(days: windowDays));
   }
 }

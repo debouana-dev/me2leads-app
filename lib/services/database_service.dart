@@ -703,8 +703,7 @@ class DatabaseService {
       planExpiresAt: row['plan_expires_at'] != null
           ? DateTime.tryParse(row['plan_expires_at'] as String)
           : null,
-      subscriptionBillingCycle:
-          row['subscription_billing_cycle'] as String?,
+      subscriptionBillingCycle: row['subscription_billing_cycle'] as String?,
     );
   }
 
@@ -1285,8 +1284,8 @@ class DatabaseService {
           .delete('notifications', where: 'owner_id = ?', whereArgs: [userId]);
       await txn.delete('organization_members',
           where: 'user_id = ?', whereArgs: [userId]);
-      await txn.delete('payment_history',
-          where: 'user_id = ?', whereArgs: [userId]);
+      await txn
+          .delete('payment_history', where: 'user_id = ?', whereArgs: [userId]);
       await txn.delete('users', where: 'id = ?', whereArgs: [userId]);
     });
   }
@@ -1394,21 +1393,27 @@ class DatabaseService {
     if (org != null) _onRemoteUpsert?.call('organizations', _orgToRow(org));
   }
 
-  /// Update license count + expiry after a successful renewal payment.
+  /// Update license count and optionally expiry after a successful payment.
   static Future<void> updateOrgLicenses(
     String orgId,
-    int licenseCount,
-    DateTime expiresAt,
-  ) async {
+    int licenseCount, {
+    DateTime? expiresAt,
+  }) async {
     final db = await database;
-    await db.update(
-      'organizations',
-      {
-        'license_count': licenseCount,
+    final values = <String, Object?>{
+      'license_count': licenseCount,
+    };
+    if (expiresAt != null) {
+      values.addAll({
         'org_plan_expires_at': expiresAt.toIso8601String(),
         'org_status': 'active',
         'org_suspended_at': null,
-      },
+      });
+    }
+
+    await db.update(
+      'organizations',
+      values,
       where: 'id = ?',
       whereArgs: [orgId],
     );
