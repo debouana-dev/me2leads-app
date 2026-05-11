@@ -27,6 +27,8 @@ class UserAccount {
   final String? organizationId; // org this user belongs to (null = no org)
   final String? orgRole; // 'admin' | 'member' | null
   final String plan; // 'free' | 'premium' | 'business'
+  final String? planExpiresAt; // 'free' | 'premium' | 'business'
+  final String? subscriptionBillingCycle; // 'free' | 'premium' | 'business'
 
   UserAccount({
     required this.id,
@@ -48,7 +50,7 @@ class UserAccount {
     this.emailVerified = false,
     this.organizationId,
     this.orgRole,
-    this.plan = 'free',
+    this.plan = 'free',  this.planExpiresAt,  this.subscriptionBillingCycle,
   })  : createdAt = createdAt ?? DateTime.now(),
         passwordChangedAt = passwordChangedAt ?? DateTime.now();
 
@@ -98,7 +100,7 @@ class UserAccount {
           ? this.organizationId
           : organizationId as String?,
       orgRole: identical(orgRole, _sentinel) ? this.orgRole : orgRole as String?,
-      plan: plan ?? this.plan,
+      plan: plan ?? this.plan, planExpiresAt: '', subscriptionBillingCycle: '',
     );
   }
 }

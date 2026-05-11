@@ -190,6 +190,8 @@ class RemoteSyncService {
         "org_role"            VARCHAR(20),
         "plan"                VARCHAR(20)  NOT NULL DEFAULT 'free',
         "last_sync_at"        VARCHAR(50),
+        "plan_expires_at"     VARCHAR(50),
+        "subscription_billing_cycle"     VARCHAR(50),
         PRIMARY KEY ("id"),
         UNIQUE ("email_lookup")
       )
