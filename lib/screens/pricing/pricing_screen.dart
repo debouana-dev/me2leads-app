@@ -7,6 +7,7 @@ import '../../core/theme/app_colors.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../services/subscription_service.dart';
 
 class PricingScreen extends ConsumerWidget {
   const PricingScreen({super.key});
@@ -16,7 +17,10 @@ class PricingScreen extends ConsumerWidget {
     final l10n = ref.watch(l10nProvider);
     final currency = ref.watch(settingsProvider).currency;
     final eurToUsd = ref.watch(eurToUsdRateProvider);
-    final plan = ref.watch(authProvider).plan;
+    final authState = ref.watch(authProvider);
+    final plan = authState.plan;
+    final planExpiresAt = authState.planExpiresAt;
+    final billingCycle = authState.subscriptionBillingCycle;
 
     final planName = switch (plan) {
       'premium' => l10n.premiumPlanName,
@@ -141,6 +145,43 @@ class PricingScreen extends ConsumerWidget {
                                   color: Colors.white.withOpacity(0.5),
                                 ),
                               ),
+                              if (planExpiresAt != null && isPaid) ...[
+                                const SizedBox(height: 4),
+                                Builder(builder: (ctx) {
+                                  final d = planExpiresAt;
+                                  final formatted =
+                                      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+                                  final isExpiring =
+                                      SubscriptionService.isInRenewalWindow(
+                                          planExpiresAt, billingCycle);
+                                  return Row(
+                                    children: [
+                                      Icon(
+                                        Icons.calendar_today_rounded,
+                                        size: 11,
+                                        color: isExpiring
+                                            ? AppColors.warning
+                                            : Colors.white.withOpacity(0.5),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          l10n.subscriptionExpiresOn2(
+                                              formatted),
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: isExpiring
+                                                ? AppColors.warning
+                                                : Colors.white.withOpacity(0.5),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }),
+                              ],
                             ],
                           ),
                         ),

@@ -27,7 +27,7 @@ if (dart.library.html) 'web_db_factory_web.dart';
 class DatabaseService {
   static Database? _db;
   static const _dbName = 'myleads.db';
-  static const _dbVersion = 16; // ✅ v16 : plan_expires_at + subscription_billing_cycle
+  static const _dbVersion = 17;
 
   // ── Remote sync callbacks ──────────────────────────────────────────────────
   static void Function(String table, Map<String, dynamic> row)? _onRemoteUpsert;
@@ -222,6 +222,25 @@ class DatabaseService {
             'ALTER TABLE users ADD COLUMN subscription_billing_cycle TEXT');
       } catch (_) {}
     }
+    if (oldVersion < 17) {
+      // v16 → v17: org license count, expiry, and suspension tracking
+      try {
+        await db.execute(
+            'ALTER TABLE organizations ADD COLUMN license_count INTEGER NOT NULL DEFAULT 1');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE organizations ADD COLUMN org_plan_expires_at TEXT');
+      } catch (_) {}
+      try {
+        await db.execute(
+            "ALTER TABLE organizations ADD COLUMN org_status TEXT NOT NULL DEFAULT 'active'");
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE organizations ADD COLUMN org_suspended_at TEXT');
+      } catch (_) {}
+    }
   }
 
   // =====================================================================
@@ -374,14 +393,18 @@ class DatabaseService {
     await db.execute(
         'CREATE INDEX idx_notifications_owner ON notifications(owner_id)');
 
-    // ----- ORGANIZATIONS (v7) -----
+    // ----- ORGANIZATIONS (v7, license columns added v17) -----
     await db.execute('''
       CREATE TABLE organizations (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         owner_id TEXT NOT NULL,
         invite_code TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        license_count INTEGER NOT NULL DEFAULT 1,
+        org_plan_expires_at TEXT,
+        org_status TEXT NOT NULL DEFAULT 'active',
+        org_suspended_at TEXT
       )
     ''');
 
@@ -516,45 +539,46 @@ class DatabaseService {
 
   // ✅ Inclut plan_expires_at et subscription_billing_cycle
   static Map<String, dynamic> _userToRow(UserAccount u) => {
-    'id': u.id,
-    'email_enc': EncryptionService.encryptText(u.email),
-    'email_lookup': _hashLookup(Validators.normalizeEmail(u.email)),
-    'first_name_enc': EncryptionService.encryptText(u.firstName),
-    'last_name_enc': EncryptionService.encryptText(u.lastName),
-    'nickname_enc': u.nickname != null
-        ? EncryptionService.encryptText(u.nickname!)
-        : null,
-    'phone_enc':
-    u.phone != null ? EncryptionService.encryptText(u.phone!) : null,
-    'phone_lookup': u.phone != null && u.phone!.trim().isNotEmpty
-        ? _hashLookup(Validators.normalizePhone(u.phone))
-        : null,
-    'date_of_birth_enc': null,
-    'company_name_enc': u.companyName != null
-        ? EncryptionService.encryptText(u.companyName!)
-        : null,
-    'company_role_enc': u.companyRole != null
-        ? EncryptionService.encryptText(u.companyRole!)
-        : null,
-    'biography_enc': u.biography != null
-        ? EncryptionService.encryptText(u.biography!)
-        : null,
-    'password_hash': u.passwordHash,
-    'auth_provider': u.authProvider,
-    'session_token': u.sessionToken,
-    'created_at': u.createdAt.toIso8601String(),
-    'last_login_at': u.lastLoginAt?.toIso8601String(),
-    'password_changed_at': u.passwordChangedAt.toIso8601String(),
-    'photo_path': u.photoPath,
-    'email_verified': u.emailVerified ? 1 : 0,
-    'organization_id': u.organizationId,
-    'org_role': u.orgRole,
-    'plan': u.plan,
-    'plan_expires_at': u.planExpiresAt?.toString(),           // ✅ v16
-    'subscription_billing_cycle': u.subscriptionBillingCycle,        // ✅ v16
-  };
+        'id': u.id,
+        'email_enc': EncryptionService.encryptText(u.email),
+        'email_lookup': _hashLookup(Validators.normalizeEmail(u.email)),
+        'first_name_enc': EncryptionService.encryptText(u.firstName),
+        'last_name_enc': EncryptionService.encryptText(u.lastName),
+        'nickname_enc': u.nickname != null
+            ? EncryptionService.encryptText(u.nickname!)
+            : null,
+        'phone_enc':
+            u.phone != null ? EncryptionService.encryptText(u.phone!) : null,
+        'phone_lookup': u.phone != null && u.phone!.trim().isNotEmpty
+            ? _hashLookup(Validators.normalizePhone(u.phone))
+            : null,
+        // date_of_birth_enc column is kept in schema for v5→v6 migration
+        // compatibility but no longer written (doc v7: DoB removed).
+        'date_of_birth_enc': null,
+        'company_name_enc': u.companyName != null
+            ? EncryptionService.encryptText(u.companyName!)
+            : null,
+        'company_role_enc': u.companyRole != null
+            ? EncryptionService.encryptText(u.companyRole!)
+            : null,
+        'biography_enc': u.biography != null
+            ? EncryptionService.encryptText(u.biography!)
+            : null,
+        'password_hash': u.passwordHash,
+        'auth_provider': u.authProvider,
+        'session_token': u.sessionToken,
+        'created_at': u.createdAt.toIso8601String(),
+        'last_login_at': u.lastLoginAt?.toIso8601String(),
+        'password_changed_at': u.passwordChangedAt.toIso8601String(),
+        'photo_path': u.photoPath,
+        'email_verified': u.emailVerified ? 1 : 0,
+        'organization_id': u.organizationId,
+        'org_role': u.orgRole,
+        'plan': u.plan,
+        'plan_expires_at': u.planExpiresAt?.toIso8601String(),
+        'subscription_billing_cycle': u.subscriptionBillingCycle,
+      };
 
-  // ✅ Lit plan_expires_at et subscription_billing_cycle
   static UserAccount _userFromRow(Map<String, dynamic> row) {
     return UserAccount(
       id: row['id'] as String,
@@ -590,11 +614,10 @@ class DatabaseService {
       organizationId: row['organization_id'] as String?,
       orgRole: row['org_role'] as String?,
       plan: row['plan'] as String? ?? 'free',
-      planExpiresAt: row['plan_expires_at'] != null               // ✅ v16
-          ? row['plan_expires_at'] as String
+      planExpiresAt: row['plan_expires_at'] != null
+          ? DateTime.tryParse(row['plan_expires_at'] as String)
           : null,
-      subscriptionBillingCycle:                                    // ✅ v16
-      row['subscription_billing_cycle'] as String?,
+      subscriptionBillingCycle: row['subscription_billing_cycle'] as String?,
     );
   }
 
@@ -1106,9 +1129,11 @@ class DatabaseService {
       await txn.delete('interactions', where: 'owner_id = ?', whereArgs: [userId]);
       await txn.delete('contacts', where: 'owner_id = ?', whereArgs: [userId]);
       await txn.delete('reminders', where: 'owner_id = ?', whereArgs: [userId]);
-      await txn.delete('payment_methods', where: 'owner_id = ?', whereArgs: [userId]);
+      await txn.delete('payment_methods',
+          where: 'owner_id = ?', whereArgs: [userId]);
       await txn.delete('notifications', where: 'owner_id = ?', whereArgs: [userId]);
-      await txn.delete('organization_members', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('organization_members',
+          where: 'user_id = ?', whereArgs: [userId]);
       await txn.delete('payment_history', where: 'user_id = ?', whereArgs: [userId]);
       await txn.delete('users', where: 'id = ?', whereArgs: [userId]);
     });
@@ -1165,20 +1190,80 @@ class DatabaseService {
   }
 
   static Map<String, dynamic> _orgToRow(Organization o) => {
-    'id': o.id,
-    'name': o.name,
-    'owner_id': o.ownerId,
-    'invite_code': o.inviteCode,
-    'created_at': o.createdAt.toIso8601String(),
-  };
+        'id': o.id,
+        'name': o.name,
+        'owner_id': o.ownerId,
+        'invite_code': o.inviteCode,
+        'created_at': o.createdAt.toIso8601String(),
+        'license_count': o.licenseCount,
+        'org_plan_expires_at': o.orgPlanExpiresAt?.toIso8601String(),
+        'org_status': o.orgStatus,
+        'org_suspended_at': o.orgSuspendedAt?.toIso8601String(),
+      };
 
   static Organization _orgFromRow(Map<String, dynamic> row) => Organization(
-    id: row['id'] as String,
-    name: row['name'] as String,
-    ownerId: row['owner_id'] as String,
-    inviteCode: row['invite_code'] as String,
-    createdAt: DateTime.parse(row['created_at'] as String),
-  );
+        id: row['id'] as String,
+        name: row['name'] as String,
+        ownerId: row['owner_id'] as String,
+        inviteCode: row['invite_code'] as String,
+        createdAt: DateTime.parse(row['created_at'] as String),
+        licenseCount: (row['license_count'] as int?) ?? 1,
+        orgPlanExpiresAt: row['org_plan_expires_at'] != null
+            ? DateTime.tryParse(row['org_plan_expires_at'] as String)
+            : null,
+        orgStatus: (row['org_status'] as String?) ?? 'active',
+        orgSuspendedAt: row['org_suspended_at'] != null
+            ? DateTime.tryParse(row['org_suspended_at'] as String)
+            : null,
+      );
+
+  /// Suspend or reactivate an organization without touching the full row.
+  static Future<void> updateOrgStatus(
+    String orgId,
+    String status, {
+    DateTime? suspendedAt,
+  }) async {
+    final db = await database;
+    await db.update(
+      'organizations',
+      {
+        'org_status': status,
+        'org_suspended_at': suspendedAt?.toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [orgId],
+    );
+    final org = await findOrganizationById(orgId);
+    if (org != null) _onRemoteUpsert?.call('organizations', _orgToRow(org));
+  }
+
+  /// Update license count and optionally expiry after a successful payment.
+  static Future<void> updateOrgLicenses(
+    String orgId,
+    int licenseCount, {
+    DateTime? expiresAt,
+  }) async {
+    final db = await database;
+    final values = <String, Object?>{
+      'license_count': licenseCount,
+    };
+    if (expiresAt != null) {
+      values.addAll({
+        'org_plan_expires_at': expiresAt.toIso8601String(),
+        'org_status': 'active',
+        'org_suspended_at': null,
+      });
+    }
+
+    await db.update(
+      'organizations',
+      values,
+      where: 'id = ?',
+      whereArgs: [orgId],
+    );
+    final org = await findOrganizationById(orgId);
+    if (org != null) _onRemoteUpsert?.call('organizations', _orgToRow(org));
+  }
 
   // =====================================================================
   // ORGANIZATION MEMBERS

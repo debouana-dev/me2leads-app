@@ -21,6 +21,7 @@ import 'services/notification_service.dart';
 import 'services/remote_sync_service.dart';
 import 'services/storage_service.dart';
 import 'services/stripe_service.dart';
+import 'services/subscription_service.dart';
 
 const _uuid = Uuid();
 
@@ -44,13 +45,23 @@ Future<void> _applyStartupPaymentRecovery() async {
   final user = StorageService.currentUser;
   if (user == null) return; // no session yet — nothing to update
 
-  // Update plan in the local DB and session so AuthNotifier starts correctly.
-  if (user.plan != recovery.plan) {
-    final updated = user.copyWith(plan: recovery.plan);
+  // Update plan + expiry in the local DB and session so AuthNotifier starts
+  // correctly. Also update when the billing cycle changed (renewal case).
+  if (user.plan != recovery.plan ||
+      user.subscriptionBillingCycle != recovery.billingCycle) {
+    final expiresAt = recovery.billingCycle == 'yearly'
+        ? DateTime.now().add(const Duration(days: 365))
+        : DateTime.now().add(const Duration(days: 30));
+    final updated = user.copyWith(
+      plan: recovery.plan,
+      planExpiresAt: expiresAt,
+      subscriptionBillingCycle: recovery.billingCycle,
+    );
     await DatabaseService.updateUser(updated);
     await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
     debugPrint(
-      '_applyStartupPaymentRecovery: plan updated to ${recovery.plan}',
+      '_applyStartupPaymentRecovery: plan updated to ${recovery.plan} '
+      '(${recovery.billingCycle}), expires ${expiresAt.toIso8601String()}',
     );
   }
 
@@ -149,6 +160,24 @@ void main() async {
     await NotificationService.init();
   } catch (e, st) {
     debugPrint('NotificationService.init failed: $e\n$st');
+  }
+
+  // After NotificationService is ready: enforce expiry (auto-downgrade) and
+  // re-register any renewal push notifications lost on device reboot.
+  try {
+    final wasDowngraded = await SubscriptionService.checkAndEnforceExpiry();
+    if (!wasDowngraded) {
+      final user = StorageService.currentUser;
+      if (user != null && user.plan != 'free' && user.planExpiresAt != null) {
+        await NotificationService.scheduleSubscriptionRenewalNotifications(
+          userId: user.id,
+          planExpiresAt: user.planExpiresAt!,
+          billingCycle: user.subscriptionBillingCycle ?? 'monthly',
+        );
+      }
+    }
+  } catch (e, st) {
+    debugPrint('Subscription startup check failed: $e\n$st');
   }
 
   try {

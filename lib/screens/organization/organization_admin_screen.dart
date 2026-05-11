@@ -6,13 +6,25 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../config/app_config.dart';
 import '../../core/l10n/app_l10n.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/organization.dart';
+import '../../models/user_account.dart';
 import '../../providers/organization_provider.dart';
+import '../../services/database_service.dart';
 import '../../services/photo_storage_service.dart';
 import '../../services/storage_service.dart';
+import '../../services/stripe_service.dart';
+import '../../services/subscription_service.dart';
+
+const _renewalUuid = Uuid();
+
+// Unit prices in EUR per license (matches StripeService price map).
+const _unitMonthly = 7.19;
+const _unitYearly = 71.88;
 
 class OrganizationAdminScreen extends ConsumerStatefulWidget {
   const OrganizationAdminScreen({super.key});
@@ -60,8 +72,8 @@ class _OrganizationAdminScreenState
                 color: AppColors.onSurface(context),
                 fontWeight: FontWeight.w700,
                 fontSize: 17)),
-        content: Text(body,
-            style: TextStyle(color: AppColors.secondary(context))),
+        content:
+            Text(body, style: TextStyle(color: AppColors.secondary(context))),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -70,7 +82,8 @@ class _OrganizationAdminScreenState
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(confirmLabel,
-                style: TextStyle(color: confirmColor, fontWeight: FontWeight.w700)),
+                style: TextStyle(
+                    color: confirmColor, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -229,15 +242,14 @@ class _OrganizationAdminScreenState
       required bool canViewReminders,
       required bool canViewHistory}) async {
     final l10n = ref.read(l10nProvider);
-    final err = await ref
-        .read(organizationProvider.notifier)
-        .updateMemberPrivileges(
-          userId: member.userId,
-          canEdit: canEdit,
-          canCreate: canCreate,
-          canViewReminders: canViewReminders,
-          canViewHistory: canViewHistory,
-        );
+    final err =
+        await ref.read(organizationProvider.notifier).updateMemberPrivileges(
+              userId: member.userId,
+              canEdit: canEdit,
+              canCreate: canCreate,
+              canViewReminders: canViewReminders,
+              canViewHistory: canViewHistory,
+            );
     if (!mounted) return;
     if (err != null) {
       _showSnack(err, error: true);
@@ -255,8 +267,9 @@ class _OrganizationAdminScreenState
       confirmLabel: l10n.suspendMember,
     );
     if (ok != true || !mounted) return;
-    final err =
-        await ref.read(organizationProvider.notifier).suspendMember(member.userId);
+    final err = await ref
+        .read(organizationProvider.notifier)
+        .suspendMember(member.userId);
     if (!mounted) return;
     if (err != null) {
       _showSnack(err, error: true);
@@ -306,6 +319,177 @@ class _OrganizationAdminScreenState
     }
   }
 
+  Future<String?> _fetchOrgBillingCycle() async {
+    final userId = StorageService.currentUserId;
+    final history = await DatabaseService.getPaymentHistory(userId);
+    for (final record in history) {
+      if (record.plan == 'business' && record.status == 'succeeded') {
+        return record.billingCycle;
+      }
+    }
+    return null;
+  }
+
+  int _calculateOrgLicensePaymentAmountInCents({
+    required int currentLicenseCount,
+    required int requestedLicenseCount,
+    required String billingCycle,
+    required DateTime? expiresAt,
+  }) {
+    final unitAmountCents = billingCycle == 'yearly'
+        ? (_unitYearly * 100).round()
+        : (_unitMonthly * 100).round();
+    final addedSeats = requestedLicenseCount - currentLicenseCount;
+    if (addedSeats <= 0) {
+      return unitAmountCents * requestedLicenseCount;
+    }
+
+    if (expiresAt == null) {
+      return unitAmountCents * addedSeats;
+    }
+
+    final remainingDays = expiresAt.difference(DateTime.now()).inDays;
+    if (remainingDays <= 0) {
+      return unitAmountCents * addedSeats;
+    }
+
+    final totalDays = billingCycle == 'yearly' ? 365 : 30;
+    final prorated = unitAmountCents * addedSeats * remainingDays / totalDays;
+    return prorated.round().clamp(1, double.maxFinite).toInt();
+  }
+
+  // ─── License renewal ─────────────────────────────────────────────────────
+
+  /// Shows a bottom sheet where the admin selects billing cycle and confirms
+  /// the renewal payment. The license count is fixed to the current member
+  /// count (active + suspended) so the admin always pays for all accounts.
+  Future<void> _doRenewLicenses() async {
+    final l10n = ref.read(l10nProvider);
+    final orgState = ref.read(organizationProvider);
+    final org = orgState.organization;
+    if (org == null) return;
+
+    // Must pay for at least the current member count.
+    final minLicenses = orgState.totalMemberCount;
+
+    final existingBillingCycle = await _fetchOrgBillingCycle();
+    if (!mounted) return;
+
+    String? billingCycle = existingBillingCycle ?? 'monthly';
+    int licenseCount = minLicenses < 1 ? 1 : minLicenses;
+
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surfaceColor(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => _RenewalSheet(
+        initialLicenses: licenseCount,
+        minLicenses: minLicenses,
+        initialBillingCycle: billingCycle!,
+        allowedBillingCycle: existingBillingCycle,
+        onConfirm: (cycle, count) {
+          billingCycle = cycle;
+          licenseCount = count;
+          Navigator.of(ctx).pop(true);
+        },
+        l10n: l10n,
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final user = StorageService.currentUser;
+    if (user == null) return;
+
+    final isRenewal = licenseCount == org.licenseCount;
+    final isInRenewalWindow = SubscriptionService.isInRenewalWindow(
+      org.orgPlanExpiresAt,
+      billingCycle,
+    );
+
+    if (isRenewal && !isInRenewalWindow) {
+      final renewalStart = SubscriptionService.renewalWindowStart(
+          org.orgPlanExpiresAt, billingCycle);
+      if (renewalStart != null) {
+        final formattedDate =
+            '${renewalStart.day.toString().padLeft(2, '0')}/${renewalStart.month.toString().padLeft(2, '0')}/${renewalStart.year}';
+        _showSnack(l10n.orgRenewalWindowNotOpen(formattedDate), error: true);
+      } else {
+        _showSnack(l10n.orgRenewalWindowNotOpenGeneric, error: true);
+      }
+      return;
+    }
+
+    if (!AppConfig.stripePublishableKey.isNotEmpty) {
+      _showSnack('Stripe not configured', error: true);
+      return;
+    }
+
+    final amountToPayCents = _calculateOrgLicensePaymentAmountInCents(
+      currentLicenseCount: org.licenseCount,
+      requestedLicenseCount: licenseCount,
+      billingCycle: billingCycle!,
+      expiresAt: org.orgPlanExpiresAt,
+    );
+
+    setState(() {});
+    final result = await StripeService.startCheckout(
+      plan: 'business',
+      billingCycle: billingCycle!,
+      userEmail: user.email,
+      licenseCount: licenseCount,
+      amount: amountToPayCents.toDouble(),
+    );
+
+    if (!mounted) return;
+
+    if (!result.success) {
+      final msg = result.errorCode == 'cancelled'
+          ? l10n.paymentCancelled
+          : l10n.paymentFailed;
+      _showSnack(msg, error: true);
+      return;
+    }
+
+    // Record payment for the org license pool, including the admin seat.
+    final record = PaymentRecord(
+      id: result.paymentIntentId?.isNotEmpty == true
+          ? result.paymentIntentId!
+          : _renewalUuid.v4(),
+      userId: user.id,
+      plan: 'business',
+      billingCycle: billingCycle!,
+      amount: amountToPayCents / 100,
+      currency: 'EUR',
+      status: 'succeeded',
+      stripePaymentIntentId: result.paymentIntentId ?? '',
+      createdAt: DateTime.now().toIso8601String(),
+    );
+    await DatabaseService.insertPaymentRecord(record);
+
+    final shouldRenewExpiry = isRenewal;
+    final expiresAt = shouldRenewExpiry
+        ? (billingCycle == 'yearly'
+            ? DateTime.now().add(const Duration(days: 365))
+            : DateTime.now().add(const Duration(days: 30)))
+        : org.orgPlanExpiresAt;
+
+    final err = await ref.read(organizationProvider.notifier).renewOrgLicenses(
+          licenseCount: licenseCount,
+          expiresAt: expiresAt,
+        );
+
+    if (!mounted) return;
+    if (err != null) {
+      _showSnack(err, error: true);
+    } else {
+      _showSnack(l10n.orgLicensesRenewed);
+    }
+  }
+
   // ─── Build ────────────────────────────────────────────────────────────────
 
   @override
@@ -339,6 +523,8 @@ class _OrganizationAdminScreenState
     final members = orgState.members;
     final activeCount = members.where((m) => m.status == 'active').length;
     final totalContacts = orgState.uniqueContactCount;
+    final isSuspended = orgState.isOrgSuspended;
+    final expiresAt = orgState.orgPlanExpiresAt;
 
     return Scaffold(
       backgroundColor: AppColors.bg(context),
@@ -346,6 +532,17 @@ class _OrganizationAdminScreenState
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
         children: [
+          // ── Suspension / expiry banner ────────────────────────────────────
+          if (isSuspended) ...[
+            _SuspensionBanner(
+              org: org,
+              isAdmin: isAdmin,
+              onRenew: _doRenewLicenses,
+              l10n: l10n,
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // ── Org stats card ────────────────────────────────────────────────
           _OrgStatsCard(
             orgName: org.name,
@@ -354,10 +551,23 @@ class _OrganizationAdminScreenState
             totalContacts: totalContacts,
             l10n: l10n,
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+
+          // ── License info card (admin only) ────────────────────────────────
+          if (isAdmin) ...[
+            _LicenseInfoCard(
+              licenseCount: org.licenseCount,
+              usedSeats: members.length,
+              expiresAt: expiresAt,
+              isSuspended: isSuspended,
+              onRenew: _doRenewLicenses,
+              l10n: l10n,
+            ),
+            const SizedBox(height: 16),
+          ],
 
           // ── Invite code card (admin only) ─────────────────────────────────
-          if (isAdmin) ...[
+          if (isAdmin && !isSuspended) ...[
             _SectionLabel(l10n.inviteCodeLabel),
             const SizedBox(height: 10),
             _InviteCodeCard(
@@ -370,15 +580,15 @@ class _OrganizationAdminScreenState
           ],
 
           // ── Members list ──────────────────────────────────────────────────
-          _SectionLabel('${l10n.orgMembersTitle} (${members.length})'),
+          _SectionLabel(
+              '${l10n.orgMembersTitle} (${members.length}/${org.licenseCount})'),
           const SizedBox(height: 10),
           if (members.isEmpty)
             Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Text(l10n.noOrgMembers,
-                    style:
-                        TextStyle(color: AppColors.secondary(context))),
+                    style: TextStyle(color: AppColors.secondary(context))),
               ),
             )
           else
@@ -625,15 +835,15 @@ class _InviteCodeCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(l10n.inviteInfo,
-              style: TextStyle(
-                  fontSize: 12, color: AppColors.secondary(context))),
+              style:
+                  TextStyle(fontSize: 12, color: AppColors.secondary(context))),
           const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 14, horizontal: 16),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                   decoration: BoxDecoration(
                     color: AppColors.inputBackground(context),
                     borderRadius: BorderRadius.circular(10),
@@ -758,7 +968,9 @@ class _MemberCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                     image: member.photoPath != null && !kIsWeb
                         ? DecorationImage(
-                            image: FileImage(File(PhotoStorageService.resolveAbsolutePath(member.photoPath)!)),
+                            image: FileImage(File(
+                                PhotoStorageService.resolveAbsolutePath(
+                                    member.photoPath)!)),
                             fit: BoxFit.cover,
                           )
                         : null,
@@ -788,9 +1000,7 @@ class _MemberCard extends StatelessWidget {
                           Expanded(
                             child: Text(
                               member.fullName +
-                                  (isCurrentUser
-                                      ? ' ${l10n.youLabel}'
-                                      : ''),
+                                  (isCurrentUser ? ' ${l10n.youLabel}' : ''),
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
@@ -819,15 +1029,17 @@ class _MemberCard extends StatelessWidget {
                       Text(
                         member.email,
                         style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.secondary(context)),
+                            fontSize: 12, color: AppColors.secondary(context)),
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${l10n.orgContactsCount(member.contactCount)}  •  '
-                        '${l10n.memberSince} '
-                        '${DateFormat('dd/MM/yyyy').format(member.joinedAt)}',
+                        isAdmin || isCurrentUser
+                            ? '${l10n.orgContactsCount(member.contactCount)}  •  '
+                                '${l10n.memberSince} '
+                                '${DateFormat('dd/MM/yyyy').format(member.joinedAt)}'
+                            : '${l10n.memberSince} '
+                                '${DateFormat('dd/MM/yyyy').format(member.joinedAt)}',
                         style: TextStyle(
                             fontSize: 11, color: AppColors.hint(context)),
                       ),
@@ -1051,8 +1263,8 @@ class _PrivilegeRow extends StatelessWidget {
       children: [
         Expanded(
           child: Text(label,
-              style: TextStyle(
-                  fontSize: 13, color: AppColors.secondary(context))),
+              style:
+                  TextStyle(fontSize: 13, color: AppColors.secondary(context))),
         ),
         Switch(
           value: value,
@@ -1120,10 +1332,528 @@ class _SheetAction extends StatelessWidget {
             const SizedBox(width: 14),
             Text(label,
                 style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: color)),
+                    fontSize: 14, fontWeight: FontWeight.w600, color: color)),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Suspension banner ────────────────────────────────────────────────────────
+
+class _SuspensionBanner extends StatelessWidget {
+  const _SuspensionBanner({
+    required this.org,
+    required this.isAdmin,
+    required this.onRenew,
+    required this.l10n,
+  });
+
+  final Organization org;
+  final bool isAdmin;
+  final VoidCallback onRenew;
+  final AppL10n l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    // Compute days until permanent deletion.
+    int? daysLeft;
+    if (org.orgSuspendedAt != null) {
+      final deleteAt = org.orgSuspendedAt!.add(const Duration(days: 180));
+      daysLeft = deleteAt.difference(DateTime.now()).inDays.clamp(0, 180);
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.hot.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.hot.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded,
+                  color: AppColors.hot, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                l10n.orgSuspendedBanner,
+                style: const TextStyle(
+                  color: AppColors.hot,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            l10n.orgSuspendedDesc,
+            style: TextStyle(color: AppColors.secondary(context), fontSize: 13),
+          ),
+          if (daysLeft != null && daysLeft < 60) ...[
+            const SizedBox(height: 8),
+            Text(
+              l10n.orgDeletionWarning(daysLeft),
+              style: const TextStyle(
+                  color: AppColors.hot,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600),
+            ),
+          ],
+          if (isAdmin) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: onRenew,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.hot,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: Text(l10n.renewOrgLicenses),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─── License info card ────────────────────────────────────────────────────────
+
+class _LicenseInfoCard extends StatelessWidget {
+  const _LicenseInfoCard({
+    required this.licenseCount,
+    required this.usedSeats,
+    required this.expiresAt,
+    required this.isSuspended,
+    required this.onRenew,
+    required this.l10n,
+  });
+
+  final int licenseCount;
+  final int usedSeats;
+  final DateTime? expiresAt;
+  final bool isSuspended;
+  final VoidCallback onRenew;
+  final AppL10n l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    String? expiryText;
+    if (expiresAt != null) {
+      final d = expiresAt!;
+      expiryText = l10n.orgExpiresOn(
+          '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}');
+    }
+
+    // Determine seat usage colour.
+    final available = licenseCount - usedSeats;
+    final seatColor = available <= 0
+        ? AppColors.hot
+        : available == 1
+            ? AppColors.warm
+            : AppColors.success;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.verified_user_rounded,
+                    color: AppColors.primary, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  l10n.orgLicensesTitle,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.onSurface(context),
+                  ),
+                ),
+              ),
+              if (!isSuspended)
+                GestureDetector(
+                  onTap: onRenew,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      l10n.renewOrgLicenses,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _InfoChip(
+                  icon: Icons.people_alt_rounded,
+                  label: l10n.orgSeatsUsed(usedSeats, licenseCount),
+                  color: seatColor,
+                ),
+              ),
+              if (expiryText != null) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _InfoChip(
+                    icon: Icons.calendar_today_rounded,
+                    label: expiryText,
+                    color: isSuspended ? AppColors.hot : AppColors.info,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 13),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w600, color: color),
+              maxLines: 2,
+              overflow: TextOverflow.visible,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Renewal bottom sheet ─────────────────────────────────────────────────────
+
+class _RenewalSheet extends StatefulWidget {
+  const _RenewalSheet({
+    required this.initialLicenses,
+    required this.minLicenses,
+    required this.initialBillingCycle,
+    this.allowedBillingCycle,
+    required this.onConfirm,
+    required this.l10n,
+  });
+
+  final int initialLicenses;
+  final int minLicenses;
+  final String initialBillingCycle;
+  final String? allowedBillingCycle;
+  final void Function(String billingCycle, int licenseCount) onConfirm;
+  final AppL10n l10n;
+
+  @override
+  State<_RenewalSheet> createState() => _RenewalSheetState();
+}
+
+class _RenewalSheetState extends State<_RenewalSheet> {
+  late int _licenseCount;
+  late String _billingCycle;
+
+  double get _unitPrice =>
+      _billingCycle == 'yearly' ? _unitYearly : _unitMonthly;
+  double get _total => _unitPrice * _licenseCount;
+
+  @override
+  void initState() {
+    super.initState();
+    _licenseCount = widget.initialLicenses < 1 ? 1 : widget.initialLicenses;
+    _billingCycle = widget.initialBillingCycle;
+  }
+
+  String _fmt(double v) => '${v.toStringAsFixed(2).replaceAll('.', ',')} €';
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = widget.l10n;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 32,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.cold,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            l10n.renewOrgLicenses,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: AppColors.onSurface(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            l10n.orgCannotReduceBelow,
+            style: TextStyle(fontSize: 12, color: AppColors.hint(context)),
+          ),
+          const SizedBox(height: 20),
+
+          // Billing cycle
+          Text(l10n.orgBillingCycle,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.hint(context),
+                  letterSpacing: 1)),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.inputBackground(context),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.borderColor(context)),
+            ),
+            child: Row(
+              children: [
+                _CyclePill(
+                  label: l10n.orgMonthly,
+                  selected: _billingCycle == 'monthly',
+                  onTap: widget.allowedBillingCycle == null ||
+                          _licenseCount == widget.initialLicenses ||
+                          widget.allowedBillingCycle == 'monthly'
+                      ? () => setState(() => _billingCycle = 'monthly')
+                      : null,
+                  disabled: widget.allowedBillingCycle != null &&
+                      _licenseCount > widget.initialLicenses &&
+                      widget.allowedBillingCycle != 'monthly',
+                ),
+                _CyclePill(
+                  label: l10n.orgYearly,
+                  selected: _billingCycle == 'yearly',
+                  onTap: widget.allowedBillingCycle == null ||
+                          _licenseCount == widget.initialLicenses ||
+                          widget.allowedBillingCycle == 'yearly'
+                      ? () => setState(() => _billingCycle = 'yearly')
+                      : null,
+                  disabled: widget.allowedBillingCycle != null &&
+                      _licenseCount > widget.initialLicenses &&
+                      widget.allowedBillingCycle != 'yearly',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // License count
+          Text(l10n.orgSelectLicenses,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.hint(context),
+                  letterSpacing: 1)),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                onPressed: _licenseCount > widget.minLicenses
+                    ? () => setState(() => _licenseCount--)
+                    : null,
+                icon: Icon(
+                  Icons.remove_circle_outline_rounded,
+                  color: _licenseCount > widget.minLicenses
+                      ? AppColors.primary
+                      : AppColors.cold,
+                  size: 28,
+                ),
+              ),
+              Text(
+                '$_licenseCount',
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.primary,
+                ),
+              ),
+              IconButton(
+                onPressed: () {
+                  setState(() {
+                    _licenseCount++;
+                    if (widget.allowedBillingCycle != null &&
+                        _licenseCount > widget.initialLicenses &&
+                        _billingCycle != widget.allowedBillingCycle) {
+                      _billingCycle = widget.allowedBillingCycle!;
+                    }
+                  });
+                },
+                icon: const Icon(
+                  Icons.add_circle_outline_rounded,
+                  color: AppColors.primary,
+                  size: 28,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Total price
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(12),
+              border:
+                  Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'TOTAL',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                    fontSize: 12,
+                    letterSpacing: 1,
+                  ),
+                ),
+                Text(
+                  _fmt(_total),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                    fontSize: 20,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => widget.onConfirm(_billingCycle, _licenseCount),
+              icon: const Icon(Icons.payment_rounded),
+              label: Text(l10n.renewOrgLicenses),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CyclePill extends StatelessWidget {
+  const _CyclePill({
+    required this.label,
+    required this.selected,
+    this.onTap,
+    this.disabled = false,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+  final bool disabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: disabled ? null : onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          margin: const EdgeInsets.all(4),
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.primary
+                : disabled
+                    ? AppColors.borderColor(context)
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: selected
+                  ? Colors.white
+                  : disabled
+                      ? AppColors.hint(context)
+                      : AppColors.secondary(context),
+            ),
+          ),
         ),
       ),
     );

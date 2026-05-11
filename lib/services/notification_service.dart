@@ -116,6 +116,15 @@ class NotificationService {
   static int _incompletePushId(String contactId) =>
       'incomplete_$contactId'.hashCode.abs() % 1000000;
 
+  static int _subEarlyPushId(String userId) =>
+      'sub_early_$userId'.hashCode.abs() % 1000000;
+
+  static int _subMidPushId(String userId) =>
+      'sub_mid_$userId'.hashCode.abs() % 1000000;
+
+  static int _subLastPushId(String userId) =>
+      'sub_last_$userId'.hashCode.abs() % 1000000;
+
   // -----------------------------------------------------------------------
   // Internal push helpers
   // -----------------------------------------------------------------------
@@ -504,6 +513,101 @@ class NotificationService {
         await createIncompleteContactNotification(c);
       }
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Public API — subscription renewal reminders
+  // -----------------------------------------------------------------------
+
+  /// Schedules (or re-schedules) the 3 renewal push + in-app notifications
+  /// for the current subscription cycle:
+  ///   Monthly → early = expiry−5d, mid = expiry−3d, last = expiry
+  ///   Yearly  → early = expiry−7d, mid = expiry−3d, last = expiry
+  ///
+  /// Safe to call multiple times — existing pushes are cancelled first and
+  /// in-app records are deduplicated by ID.
+  static Future<void> scheduleSubscriptionRenewalNotifications({
+    required String userId,
+    required DateTime planExpiresAt,
+    required String billingCycle,
+  }) async {
+    final earlyOffset =
+        billingCycle == 'yearly' ? const Duration(days: 7) : const Duration(days: 5);
+    final earlyDate = planExpiresAt.subtract(earlyOffset);
+    final midDate = planExpiresAt.subtract(const Duration(days: 3));
+    final lastDate = planExpiresAt;
+    final now = DateTime.now();
+
+    // Cancel stale pushes first so re-scheduling on renewal is clean.
+    if (!kIsWeb && _initialized) {
+      try { await _plugin.cancel(_subEarlyPushId(userId)); } catch (_) {}
+      try { await _plugin.cancel(_subMidPushId(userId)); } catch (_) {}
+      try { await _plugin.cancel(_subLastPushId(userId)); } catch (_) {}
+    }
+
+    // Delete stale in-app records so they get fresh scheduled_at dates.
+    await DatabaseService.deleteNotification('sub_early_$userId');
+    await DatabaseService.deleteNotification('sub_mid_$userId');
+    await DatabaseService.deleteNotification('sub_last_$userId');
+
+    final earlyDays = billingCycle == 'yearly' ? '7' : '5';
+
+    Future<void> _schedule(String notifId, int pushId, DateTime scheduledAt,
+        String title, String body) async {
+      if (scheduledAt.isBefore(now)) return;
+      await _persistIfNew(AppNotification(
+        id: notifId,
+        ownerId: userId,
+        type: 'subscription_renewal',
+        title: title,
+        body: body,
+        scheduledAt: scheduledAt,
+        createdAt: now,
+      ));
+      await _schedulePush(
+        id: pushId,
+        title: title,
+        body: body,
+        priority: 'important',
+        scheduledAt: scheduledAt,
+      );
+    }
+
+    await _schedule(
+      'sub_early_$userId',
+      _subEarlyPushId(userId),
+      earlyDate,
+      'Abonnement bientôt expiré',
+      'Votre abonnement expire dans $earlyDays jours. Renouvelez maintenant pour conserver toutes vos fonctionnalités.',
+    );
+    await _schedule(
+      'sub_mid_$userId',
+      _subMidPushId(userId),
+      midDate,
+      'Abonnement bientôt expiré',
+      'Votre abonnement expire dans 3 jours. Renouvelez maintenant.',
+    );
+    await _schedule(
+      'sub_last_$userId',
+      _subLastPushId(userId),
+      lastDate,
+      "Dernier jour de votre abonnement",
+      "C'est le dernier jour de votre abonnement. Renouvelez dès maintenant.",
+    );
+  }
+
+  /// Cancels all subscription renewal push and in-app notifications for [userId].
+  /// Call when the user changes plan (renew, upgrade, or downgrade to free).
+  static Future<void> cancelSubscriptionRenewalNotifications(
+      String userId) async {
+    if (!kIsWeb && _initialized) {
+      try { await _plugin.cancel(_subEarlyPushId(userId)); } catch (_) {}
+      try { await _plugin.cancel(_subMidPushId(userId)); } catch (_) {}
+      try { await _plugin.cancel(_subLastPushId(userId)); } catch (_) {}
+    }
+    await DatabaseService.deleteNotification('sub_early_$userId');
+    await DatabaseService.deleteNotification('sub_mid_$userId');
+    await DatabaseService.deleteNotification('sub_last_$userId');
   }
 
   // -----------------------------------------------------------------------
