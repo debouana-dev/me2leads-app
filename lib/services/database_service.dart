@@ -280,7 +280,7 @@ class DatabaseService {
       await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_payment_history_user ON payment_history(user_id)');
     }
-    if (oldVersion < 15) {
+    if (oldVersion < 14) {
       // v14 → v15: payment method type column on payment history
       try {
         await db.execute(
@@ -2050,6 +2050,63 @@ class DatabaseService {
   // =====================================================================
   // Helpers
   // =====================================================================
+
+
+  static Future<void> debugCheckAllTables() async {
+    final db = await database;
+
+    // Tables attendues
+    final expectedTables = [
+      'users',
+      'contacts',
+      'reminders',
+      'interactions',
+      'payment_methods',
+      'payment_history',
+      'session',
+      'notifications',
+      'organizations',
+      'organization_members',
+    ];
+
+    // Tables présentes dans la BD
+    final result = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    );
+    final existingTables = result
+        .map((r) => r['name'] as String)
+        .where((n) => !n.startsWith('sqlite_') && n != 'android_metadata')
+        .toSet();
+
+    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    debugPrint('🗄️  VÉRIFICATION DES TABLES SQLite');
+    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    bool allOk = true;
+    for (final table in expectedTables) {
+      if (existingTables.contains(table)) {
+        final count = Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM "$table"'),
+        ) ?? 0;
+        debugPrint('✅ $table ($count lignes)');
+      } else {
+        debugPrint('❌ $table — MANQUANTE');
+        allOk = false;
+      }
+    }
+
+    // Tables inattendues (présentes mais pas dans la liste)
+    final unexpected = existingTables.difference(expectedTables.toSet());
+    if (unexpected.isNotEmpty) {
+      debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      debugPrint('⚠️  Tables inattendues : $unexpected');
+    }
+
+    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    debugPrint(allOk ? '🎉 Toutes les tables sont présentes' : '🚨 Des tables manquent !');
+    debugPrint('📌 Version BD : $_dbVersion');
+    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  }
 
   /// Deterministic SHA-256 hash used for unique-lookup columns.
   /// We can't store plaintext for uniqueness checks, so we hash with a
