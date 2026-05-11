@@ -9,6 +9,7 @@ import 'database_service.dart';
 import 'notification_service.dart';
 import 'remote_sync_service.dart';
 import 'storage_service.dart';
+import 'subscription_service.dart';
 
 const _kPeriodicTaskName    = 'myleads_notification_check';
 const _kBusinessSyncTaskName = 'myleads_business_sync';
@@ -26,6 +27,9 @@ void callbackDispatcher() {
 
       final ownerId = StorageService.currentUserId;
       if (ownerId.isEmpty) return true;
+
+      // Enforce subscription expiry before running any plan-dependent task.
+      await SubscriptionService.checkAndEnforceExpiry();
 
       if (task == _kBusinessSyncTaskName) {
         // Belt-and-suspenders plan check — skip silently if plan was downgraded.

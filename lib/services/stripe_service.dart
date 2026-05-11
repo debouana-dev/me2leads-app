@@ -219,12 +219,15 @@ class StripeService {
     required String plan,
     required String billingCycle,
     required String userEmail,
+    int licenseCount = 1,
+    double? amount,
   }) async {
-    final amount = billingCycle == 'yearly'
+    final unitAmount = billingCycle == 'yearly'
         ? (_yearlyPrices[plan] ?? 0)
         : (_monthlyPrices[plan] ?? 0);
+    final rentAmount = amount ?? unitAmount * licenseCount;
 
-    if (amount == 0) {
+    if (rentAmount == 0) {
       return const PaymentCheckoutResult(
         success: false,
         errorCode: 'invalid_plan',
@@ -240,8 +243,9 @@ class StripeService {
       final result = await callable.call(<String, dynamic>{
         'plan': plan,
         'billingCycle': billingCycle,
-        'amount': amount,
+        'amount': rentAmount,
         'currency': 'eur',
+        'licenseCount': licenseCount,
       });
       final data = result.data as Map<String, dynamic>;
       clientSecret = data['clientSecret'] as String;

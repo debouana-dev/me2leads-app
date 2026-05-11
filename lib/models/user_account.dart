@@ -27,6 +27,8 @@ class UserAccount {
   final String? organizationId; // org this user belongs to (null = no org)
   final String? orgRole; // 'admin' | 'member' | null
   final String plan; // 'free' | 'premium' | 'business'
+  final DateTime? planExpiresAt; // null for free plan
+  final String? subscriptionBillingCycle; // 'monthly' | 'yearly' | null
 
   UserAccount({
     required this.id,
@@ -49,6 +51,8 @@ class UserAccount {
     this.organizationId,
     this.orgRole,
     this.plan = 'free',
+    this.planExpiresAt,
+    this.subscriptionBillingCycle,
   })  : createdAt = createdAt ?? DateTime.now(),
         passwordChangedAt = passwordChangedAt ?? DateTime.now();
 
@@ -75,6 +79,8 @@ class UserAccount {
     Object? organizationId = _sentinel,
     Object? orgRole = _sentinel,
     String? plan,
+    Object? planExpiresAt = _sentinel,
+    Object? subscriptionBillingCycle = _sentinel,
   }) {
     return UserAccount(
       id: id ?? this.id,
@@ -99,6 +105,12 @@ class UserAccount {
           : organizationId as String?,
       orgRole: identical(orgRole, _sentinel) ? this.orgRole : orgRole as String?,
       plan: plan ?? this.plan,
+      planExpiresAt: identical(planExpiresAt, _sentinel)
+          ? this.planExpiresAt
+          : planExpiresAt as DateTime?,
+      subscriptionBillingCycle: identical(subscriptionBillingCycle, _sentinel)
+          ? this.subscriptionBillingCycle
+          : subscriptionBillingCycle as String?,
     );
   }
 }

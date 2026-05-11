@@ -188,8 +188,10 @@ class RemoteSyncService {
         "email_verified"      SMALLINT     NOT NULL DEFAULT 0,
         "organization_id"     VARCHAR(36),
         "org_role"            VARCHAR(20),
-        "plan"                VARCHAR(20)  NOT NULL DEFAULT 'free',
-        "last_sync_at"        VARCHAR(50),
+        "plan"                        VARCHAR(20)  NOT NULL DEFAULT 'free',
+        "last_sync_at"                VARCHAR(50),
+        "plan_expires_at"             VARCHAR(50),
+        "subscription_billing_cycle"  VARCHAR(10),
         PRIMARY KEY ("id"),
         UNIQUE ("email_lookup")
       )
@@ -341,6 +343,28 @@ class RemoteSyncService {
         "ALTER TABLE \"payment_history\" ADD COLUMN IF NOT EXISTS \"payment_method\" VARCHAR(50) NOT NULL DEFAULT 'card'",
       );
     } catch (_) {}
+
+    // v16: subscription expiry tracking on users.
+    await conn.execute(
+      'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "plan_expires_at" VARCHAR(50) DEFAULT NULL',
+    );
+    await conn.execute(
+      'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "subscription_billing_cycle" VARCHAR(10) DEFAULT NULL',
+    );
+
+    // v17: org license count, expiry, and suspension tracking.
+    await conn.execute(
+      'ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "license_count" INTEGER NOT NULL DEFAULT 1',
+    );
+    await conn.execute(
+      'ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "org_plan_expires_at" VARCHAR(50) DEFAULT NULL',
+    );
+    await conn.execute(
+      "ALTER TABLE \"organizations\" ADD COLUMN IF NOT EXISTS \"org_status\" VARCHAR(20) NOT NULL DEFAULT 'active'",
+    );
+    await conn.execute(
+      'ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "org_suspended_at" VARCHAR(50) DEFAULT NULL',
+    );
   }
 
   // ── Cloud user helpers ───────────────────────────────────────────────────────
@@ -1080,13 +1104,15 @@ class RemoteSyncService {
          phone_enc,phone_lookup,date_of_birth_enc,company_name_enc,company_role_enc,
          biography_enc,password_hash,auth_provider,session_token,created_at,
          last_login_at,password_changed_at,photo_path,email_verified,
-         organization_id,org_role,plan,last_sync_at)
+         organization_id,org_role,plan,last_sync_at,
+         plan_expires_at,subscription_billing_cycle)
       VALUES
         (@id,@email_enc,@email_lookup,@first_name_enc,@last_name_enc,@nickname_enc,
          @phone_enc,@phone_lookup,@date_of_birth_enc,@company_name_enc,@company_role_enc,
          @biography_enc,@password_hash,@auth_provider,@session_token,@created_at,
          @last_login_at,@password_changed_at,@photo_path,@email_verified,
-         @organization_id,@org_role,@plan,@last_sync_at)
+         @organization_id,@org_role,@plan,@last_sync_at,
+         @plan_expires_at,@subscription_billing_cycle)
       ON CONFLICT (id) DO UPDATE SET
         email_enc=EXCLUDED.email_enc,
         email_lookup=EXCLUDED.email_lookup,
@@ -1103,7 +1129,9 @@ class RemoteSyncService {
         plan=EXCLUDED.plan,
         organization_id=EXCLUDED.organization_id,
         org_role=EXCLUDED.org_role,
-        last_sync_at=EXCLUDED.last_sync_at
+        last_sync_at=EXCLUDED.last_sync_at,
+        plan_expires_at=EXCLUDED.plan_expires_at,
+        subscription_billing_cycle=EXCLUDED.subscription_billing_cycle
     '''),
       parameters: {
         'id': r['id'],
@@ -1130,6 +1158,8 @@ class RemoteSyncService {
         'org_role': r['org_role'],
         'plan': r['plan'] ?? 'free',
         'last_sync_at': r['last_sync_at'],
+        'plan_expires_at': r['plan_expires_at'],
+        'subscription_billing_cycle': r['subscription_billing_cycle'],
       },
     );
   }
@@ -1281,10 +1311,18 @@ class RemoteSyncService {
       Connection conn, Map<String, dynamic> r) async {
     await conn.execute(
       Sql.named('''
-        INSERT INTO "organizations" (id,name,owner_id,invite_code,created_at)
-        VALUES (@id,@name,@owner_id,@invite_code,@created_at)
+        INSERT INTO "organizations"
+          (id,name,owner_id,invite_code,created_at,
+           license_count,org_plan_expires_at,org_status,org_suspended_at)
+        VALUES
+          (@id,@name,@owner_id,@invite_code,@created_at,
+           @license_count,@org_plan_expires_at,@org_status,@org_suspended_at)
         ON CONFLICT (id) DO UPDATE SET
-          name=EXCLUDED.name,invite_code=EXCLUDED.invite_code
+          name=EXCLUDED.name,invite_code=EXCLUDED.invite_code,
+          license_count=EXCLUDED.license_count,
+          org_plan_expires_at=EXCLUDED.org_plan_expires_at,
+          org_status=EXCLUDED.org_status,
+          org_suspended_at=EXCLUDED.org_suspended_at
       '''),
       parameters: {
         'id': r['id'],
@@ -1292,8 +1330,43 @@ class RemoteSyncService {
         'owner_id': r['owner_id'],
         'invite_code': r['invite_code'],
         'created_at': r['created_at'],
+        'license_count': r['license_count'] ?? 1,
+        'org_plan_expires_at': r['org_plan_expires_at'],
+        'org_status': r['org_status'] ?? 'active',
+        'org_suspended_at': r['org_suspended_at'],
       },
     );
+  }
+
+  /// Permanently deletes all cloud data for the given organization after the
+  /// 6-month suspension window has elapsed without renewal.
+  static Future<void> deleteOrganizationDataFromCloud(String orgId) async {
+    if (kIsWeb) return;
+    final conn = await _connect();
+    if (conn == null) return;
+    try {
+      await _ensureSchema(conn);
+      await conn.execute(
+        Sql.named(
+            'DELETE FROM "organization_members" WHERE "organization_id" = @id'),
+        parameters: {'id': orgId},
+      );
+      // Clear org membership fields on affected user rows
+      await conn.execute(
+        Sql.named(
+            'UPDATE "users" SET "organization_id" = NULL, "org_role" = NULL WHERE "organization_id" = @id'),
+        parameters: {'id': orgId},
+      );
+      await conn.execute(
+        Sql.named('DELETE FROM "organizations" WHERE "id" = @id'),
+        parameters: {'id': orgId},
+      );
+      debugPrint('RemoteSyncService: org $orgId permanently deleted from cloud');
+    } catch (e) {
+      debugPrint('RemoteSyncService.deleteOrganizationDataFromCloud: $e');
+    } finally {
+      await conn.close();
+    }
   }
 
   static Future<void> _upsertOrgMember(
