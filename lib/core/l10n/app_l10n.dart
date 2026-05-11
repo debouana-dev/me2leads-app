@@ -802,32 +802,31 @@ class AppL10n {
       : "Seuls les comptes Business peuvent créer une organisation. Passez au plan Business pour continuer.";
   String get orgSelectLicenses =>
       _en ? 'NUMBER OF LICENSES' : 'NOMBRE DE LICENCES';
-  String get orgSelectLicensesHint => _en
-      ? 'Includes your own account'
-      : 'Inclut votre propre compte';
+  String get orgSelectLicensesHint =>
+      _en ? 'Includes your own account' : 'Inclut votre propre compte';
   String orgLicenseCount(int n) =>
       _en ? '$n license${n == 1 ? '' : 's'}' : '$n licence${n > 1 ? 's' : ''}';
   String orgSeatsUsed(int used, int total) => _en
       ? '$used / $total seat${total == 1 ? '' : 's'} used'
       : '$used / $total place${total > 1 ? 's' : ''} utilisée${total > 1 ? 's' : ''}';
-  String orgExpiresOn(String date) =>
-      _en ? 'Expires on $date' : 'Expire le $date';
+  String orgExpiresOn(String date) => _en ? 'Exp: $date' : 'Exp: $date';
   String get orgLicensesTitle => _en ? 'Licenses' : 'Licences';
-  String get orgLicensesDesc =>
-      _en ? 'Manage organization licenses' : "Gérer les licences de l'organisation";
+  String get orgLicensesDesc => _en
+      ? 'Manage organization licenses'
+      : "Gérer les licences de l'organisation";
   String get orgSuspendedBanner =>
       _en ? 'Organization suspended' : 'Organisation suspendue';
   String get orgSuspendedDesc => _en
       ? 'Licenses have expired. Renew to restore access to shared contacts.'
       : "Les licences ont expiré. Renouvelez pour rétablir l'accès aux contacts partagés.";
-  String get orgExpiredBanner =>
-      _en ? 'Licenses expired' : 'Licences expirées';
+  String get orgExpiredBanner => _en ? 'Licenses expired' : 'Licences expirées';
   String get renewOrgLicenses =>
       _en ? 'Renew licenses' : 'Renouveler les licences';
   String orgRenewalAmount(String amount) =>
       _en ? 'Total: $amount' : 'Total : $amount';
-  String get orgLicensesRenewed =>
-      _en ? 'Licenses renewed successfully' : 'Licences renouvelées avec succès';
+  String get orgLicensesRenewed => _en
+      ? 'Licenses renewed successfully'
+      : 'Licences renouvelées avec succès';
   String get orgAtCapacity => _en
       ? 'No seats available. The organization has reached its member limit.'
       : "Plus de places disponibles. L'organisation a atteint sa limite de membres.";
@@ -1097,8 +1096,7 @@ class AppL10n {
       _en ? 'Renew subscription' : "Renouveler l'abonnement";
   String get renewAction => _en ? 'Renew' : 'Renouveler';
   String get expiringBadge => _en ? 'EXPIRING SOON' : 'EXPIRE BIENTÔT';
-  String get subscriptionRenewalBadge =>
-      _en ? 'SUBSCRIPTION' : 'ABONNEMENT';
+  String get subscriptionRenewalBadge => _en ? 'SUBSCRIPTION' : 'ABONNEMENT';
   String subscriptionDaysLeft(int days) => _en
       ? '$days day${days > 1 ? "s" : ""} remaining'
       : '$days jour${days > 1 ? "s" : ""} restant${days > 1 ? "s" : ""}';

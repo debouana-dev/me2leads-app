@@ -37,10 +37,12 @@ class _CreateOrganizationScreenState
 
   bool get _stripeReady => AppConfig.stripePublishableKey.isNotEmpty;
 
+  int get _paidLicenseCount => _licenseCount > 1 ? _licenseCount - 1 : 0;
+
   double get _unitPrice =>
       _billingCycle == 'yearly' ? _unitYearly : _unitMonthly;
 
-  double get _totalPrice => _unitPrice * _licenseCount;
+  double get _totalPrice => _unitPrice * _paidLicenseCount;
 
   String _formatPrice(double amount) =>
       '${amount.toStringAsFixed(2).replaceAll('.', ',')} €';
@@ -53,60 +55,63 @@ class _CreateOrganizationScreenState
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!_stripeReady) {
+
+    final paidLicenseCount = _paidLicenseCount;
+    if (paidLicenseCount > 0 && !_stripeReady) {
       _showSnack('Stripe not configured', AppColors.warning);
       return;
     }
 
     setState(() => _loading = true);
 
-    final authState = ref.read(authProvider);
-    final result = await StripeService.startCheckout(
-      plan: 'business',
-      billingCycle: _billingCycle,
-      userEmail: authState.userEmail,
-      licenseCount: _licenseCount,
-    );
+    if (paidLicenseCount > 0) {
+      final authState = ref.read(authProvider);
+      final result = await StripeService.startCheckout(
+        plan: 'business',
+        billingCycle: _billingCycle,
+        userEmail: authState.userEmail,
+        licenseCount: paidLicenseCount,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (!result.success) {
-      setState(() => _loading = false);
-      final l10n = ref.read(l10nProvider);
-      final msg = result.errorCode == 'cancelled'
-          ? l10n.paymentCancelled
-          : l10n.paymentFailed;
-      _showSnack(msg, AppColors.error);
-      return;
+      if (!result.success) {
+        setState(() => _loading = false);
+        final l10n = ref.read(l10nProvider);
+        final msg = result.errorCode == 'cancelled'
+            ? l10n.paymentCancelled
+            : l10n.paymentFailed;
+        _showSnack(msg, AppColors.error);
+        return;
+      }
+
+      // Payment succeeded — record it and create the org.
+      final record = PaymentRecord(
+        id: result.paymentIntentId?.isNotEmpty == true
+            ? result.paymentIntentId!
+            : _uuid.v4(),
+        userId: StorageService.currentUserId,
+        plan: 'business',
+        billingCycle: _billingCycle,
+        amount: _totalPrice,
+        currency: 'EUR',
+        status: 'succeeded',
+        stripePaymentIntentId: result.paymentIntentId ?? '',
+        createdAt: DateTime.now().toIso8601String(),
+      );
+      await DatabaseService.insertPaymentRecord(record);
     }
-
-    // Payment succeeded — record it and create the org.
-    final record = PaymentRecord(
-      id: result.paymentIntentId?.isNotEmpty == true
-          ? result.paymentIntentId!
-          : _uuid.v4(),
-      userId: StorageService.currentUserId,
-      plan: 'business',
-      billingCycle: _billingCycle,
-      amount: _totalPrice,
-      currency: 'EUR',
-      status: 'succeeded',
-      stripePaymentIntentId: result.paymentIntentId ?? '',
-      createdAt: DateTime.now().toIso8601String(),
-    );
-    await DatabaseService.insertPaymentRecord(record);
 
     final expiresAt = _billingCycle == 'yearly'
         ? DateTime.now().add(const Duration(days: 365))
         : DateTime.now().add(const Duration(days: 30));
 
-    final error = await ref
-        .read(organizationProvider.notifier)
-        .createOrganization(
-          _nameCtrl.text,
-          licenseCount: _licenseCount,
-          orgPlanExpiresAt: expiresAt,
-        );
+    final error =
+        await ref.read(organizationProvider.notifier).createOrganization(
+              _nameCtrl.text,
+              licenseCount: _licenseCount,
+              orgPlanExpiresAt: expiresAt,
+            );
 
     if (!mounted) return;
     setState(() => _loading = false);
@@ -139,7 +144,8 @@ class _CreateOrganizationScreenState
         foregroundColor: Colors.white,
         title: Text(
           l10n.createOrgTitle,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          style:
+              const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -148,9 +154,7 @@ class _CreateOrganizationScreenState
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        child: isBusinessUser
-            ? _buildForm(l10n)
-            : _buildUpgradePrompt(l10n),
+        child: isBusinessUser ? _buildForm(l10n) : _buildUpgradePrompt(l10n),
       ),
     );
   }
@@ -170,8 +174,8 @@ class _CreateOrganizationScreenState
             color: AppColors.accent.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(24),
           ),
-          child: const Icon(Icons.lock_rounded,
-              color: AppColors.accent, size: 40),
+          child:
+              const Icon(Icons.lock_rounded, color: AppColors.accent, size: 40),
         ),
         const SizedBox(height: 24),
         Text(
@@ -270,8 +274,8 @@ class _CreateOrganizationScreenState
             decoration: InputDecoration(
               hintText: l10n.orgNameHint,
               hintStyle: TextStyle(color: AppColors.hint(context)),
-              prefixIcon: Icon(Icons.business_rounded,
-                  color: AppColors.hint(context)),
+              prefixIcon:
+                  Icon(Icons.business_rounded, color: AppColors.hint(context)),
             ),
             validator: (v) =>
                 (v == null || v.trim().isEmpty) ? l10n.orgNameRequired : null,
@@ -530,8 +534,7 @@ class _PriceSummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.primary.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.18)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
       ),
       child: Column(
         children: [

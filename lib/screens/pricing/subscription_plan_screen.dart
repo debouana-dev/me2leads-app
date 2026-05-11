@@ -314,8 +314,7 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
                     isPopular: true,
                     isCurrent: currentPlan == 'premium',
                     isRenewable: currentPlan == 'premium' && isInRenewalWindow,
-                    expiryText:
-                        currentPlan == 'premium' ? expiryText : null,
+                    expiryText: currentPlan == 'premium' ? expiryText : null,
                     isLoading: _loadingPlan == 'premium',
                     onSelect: currentPlan == 'premium' && !isInRenewalWindow
                         ? null
@@ -341,8 +340,7 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
                     isPopular: false,
                     isCurrent: currentPlan == 'business',
                     isRenewable: currentPlan == 'business' && isInRenewalWindow,
-                    expiryText:
-                        currentPlan == 'business' ? expiryText : null,
+                    expiryText: currentPlan == 'business' ? expiryText : null,
                     isLoading: _loadingPlan == 'business',
                     onSelect: currentPlan == 'business' && !isInRenewalWindow
                         ? null
@@ -354,49 +352,49 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
                   const SizedBox(height: 24),
 
                   // Payment methods
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceColor(context),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.borderColor(context)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l10n.paymentMethodsTitle,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.hint(context),
-                            letterSpacing: 1,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _paymentChip(context, l10n.bankCard),
-                            _paymentChip(context, 'PayPal'),
-                            _paymentChip(context, 'Apple Pay'),
-                            _paymentChip(context, 'Google Pay'),
-                            _paymentChip(context, 'Amazon Pay'),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          l10n.securePayment,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: AppColors.hint(context),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 40),
+                  // Container(
+                  //   padding: const EdgeInsets.all(20),
+                  //   decoration: BoxDecoration(
+                  //     color: AppColors.surfaceColor(context),
+                  //     borderRadius: BorderRadius.circular(16),
+                  //     border: Border.all(color: AppColors.borderColor(context)),
+                  //   ),
+                  //   child: Column(
+                  //     crossAxisAlignment: CrossAxisAlignment.start,
+                  //     children: [
+                  //       Text(
+                  //         l10n.paymentMethodsTitle,
+                  //         style: TextStyle(
+                  //           fontSize: 11,
+                  //           fontWeight: FontWeight.w700,
+                  //           color: AppColors.hint(context),
+                  //           letterSpacing: 1,
+                  //         ),
+                  //       ),
+                  //       const SizedBox(height: 12),
+                  //       Wrap(
+                  //         spacing: 8,
+                  //         runSpacing: 8,
+                  //         children: [
+                  //           _paymentChip(context, l10n.bankCard),
+                  //           _paymentChip(context, 'PayPal'),
+                  //           _paymentChip(context, 'Apple Pay'),
+                  //           _paymentChip(context, 'Google Pay'),
+                  //           _paymentChip(context, 'Amazon Pay'),
+                  //         ],
+                  //       ),
+                  //       const SizedBox(height: 12),
+                  //       Text(
+                  //         l10n.securePayment,
+                  //         style: TextStyle(
+                  //           fontSize: 11,
+                  //           color: AppColors.hint(context),
+                  //         ),
+                  //       ),
+                  //     ],
+                  //   ),
+                  // ),
+                  // const SizedBox(height: 40),
                 ],
               ),
             ),
@@ -818,9 +816,7 @@ class _PlanCard extends StatelessWidget {
                           strokeWidth: 2.5,
                           color: isRenewable
                               ? Colors.white
-                              : (isPopular
-                                  ? AppColors.primary
-                                  : Colors.white),
+                              : (isPopular ? AppColors.primary : Colors.white),
                         ),
                       )
                     : Text(

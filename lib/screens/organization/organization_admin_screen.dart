@@ -71,8 +71,8 @@ class _OrganizationAdminScreenState
                 color: AppColors.onSurface(context),
                 fontWeight: FontWeight.w700,
                 fontSize: 17)),
-        content: Text(body,
-            style: TextStyle(color: AppColors.secondary(context))),
+        content:
+            Text(body, style: TextStyle(color: AppColors.secondary(context))),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -81,7 +81,8 @@ class _OrganizationAdminScreenState
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(confirmLabel,
-                style: TextStyle(color: confirmColor, fontWeight: FontWeight.w700)),
+                style: TextStyle(
+                    color: confirmColor, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -240,15 +241,14 @@ class _OrganizationAdminScreenState
       required bool canViewReminders,
       required bool canViewHistory}) async {
     final l10n = ref.read(l10nProvider);
-    final err = await ref
-        .read(organizationProvider.notifier)
-        .updateMemberPrivileges(
-          userId: member.userId,
-          canEdit: canEdit,
-          canCreate: canCreate,
-          canViewReminders: canViewReminders,
-          canViewHistory: canViewHistory,
-        );
+    final err =
+        await ref.read(organizationProvider.notifier).updateMemberPrivileges(
+              userId: member.userId,
+              canEdit: canEdit,
+              canCreate: canCreate,
+              canViewReminders: canViewReminders,
+              canViewHistory: canViewHistory,
+            );
     if (!mounted) return;
     if (err != null) {
       _showSnack(err, error: true);
@@ -266,8 +266,9 @@ class _OrganizationAdminScreenState
       confirmLabel: l10n.suspendMember,
     );
     if (ok != true || !mounted) return;
-    final err =
-        await ref.read(organizationProvider.notifier).suspendMember(member.userId);
+    final err = await ref
+        .read(organizationProvider.notifier)
+        .suspendMember(member.userId);
     if (!mounted) return;
     if (err != null) {
       _showSnack(err, error: true);
@@ -355,7 +356,6 @@ class _OrganizationAdminScreenState
 
     if (confirmed != true || !mounted) return;
 
-    // Stripe payment for licenseCount × unitPrice.
     final user = StorageService.currentUser;
     if (user == null) return;
 
@@ -382,7 +382,7 @@ class _OrganizationAdminScreenState
       return;
     }
 
-    // Record payment.
+    // Record payment for the full org license pool, including the admin seat.
     final unitPrice = billingCycle == 'yearly' ? _unitYearly : _unitMonthly;
     final record = PaymentRecord(
       id: result.paymentIntentId?.isNotEmpty == true
@@ -506,15 +506,15 @@ class _OrganizationAdminScreenState
           ],
 
           // ── Members list ──────────────────────────────────────────────────
-          _SectionLabel('${l10n.orgMembersTitle} (${members.length}/${org.licenseCount})'),
+          _SectionLabel(
+              '${l10n.orgMembersTitle} (${members.length}/${org.licenseCount})'),
           const SizedBox(height: 10),
           if (members.isEmpty)
             Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Text(l10n.noOrgMembers,
-                    style:
-                        TextStyle(color: AppColors.secondary(context))),
+                    style: TextStyle(color: AppColors.secondary(context))),
               ),
             )
           else
@@ -761,15 +761,15 @@ class _InviteCodeCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(l10n.inviteInfo,
-              style: TextStyle(
-                  fontSize: 12, color: AppColors.secondary(context))),
+              style:
+                  TextStyle(fontSize: 12, color: AppColors.secondary(context))),
           const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 14, horizontal: 16),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                   decoration: BoxDecoration(
                     color: AppColors.inputBackground(context),
                     borderRadius: BorderRadius.circular(10),
@@ -894,7 +894,9 @@ class _MemberCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                     image: member.photoPath != null && !kIsWeb
                         ? DecorationImage(
-                            image: FileImage(File(PhotoStorageService.resolveAbsolutePath(member.photoPath)!)),
+                            image: FileImage(File(
+                                PhotoStorageService.resolveAbsolutePath(
+                                    member.photoPath)!)),
                             fit: BoxFit.cover,
                           )
                         : null,
@@ -924,9 +926,7 @@ class _MemberCard extends StatelessWidget {
                           Expanded(
                             child: Text(
                               member.fullName +
-                                  (isCurrentUser
-                                      ? ' ${l10n.youLabel}'
-                                      : ''),
+                                  (isCurrentUser ? ' ${l10n.youLabel}' : ''),
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
@@ -955,15 +955,17 @@ class _MemberCard extends StatelessWidget {
                       Text(
                         member.email,
                         style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.secondary(context)),
+                            fontSize: 12, color: AppColors.secondary(context)),
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${l10n.orgContactsCount(member.contactCount)}  •  '
-                        '${l10n.memberSince} '
-                        '${DateFormat('dd/MM/yyyy').format(member.joinedAt)}',
+                        isAdmin || isCurrentUser
+                            ? '${l10n.orgContactsCount(member.contactCount)}  •  '
+                                '${l10n.memberSince} '
+                                '${DateFormat('dd/MM/yyyy').format(member.joinedAt)}'
+                            : '${l10n.memberSince} '
+                                '${DateFormat('dd/MM/yyyy').format(member.joinedAt)}',
                         style: TextStyle(
                             fontSize: 11, color: AppColors.hint(context)),
                       ),
@@ -1187,8 +1189,8 @@ class _PrivilegeRow extends StatelessWidget {
       children: [
         Expanded(
           child: Text(label,
-              style: TextStyle(
-                  fontSize: 13, color: AppColors.secondary(context))),
+              style:
+                  TextStyle(fontSize: 13, color: AppColors.secondary(context))),
         ),
         Switch(
           value: value,
@@ -1256,9 +1258,7 @@ class _SheetAction extends StatelessWidget {
             const SizedBox(width: 14),
             Text(label,
                 style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: color)),
+                    fontSize: 14, fontWeight: FontWeight.w600, color: color)),
           ],
         ),
       ),
@@ -1318,8 +1318,7 @@ class _SuspensionBanner extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             l10n.orgSuspendedDesc,
-            style: TextStyle(
-                color: AppColors.secondary(context), fontSize: 13),
+            style: TextStyle(color: AppColors.secondary(context), fontSize: 13),
           ),
           if (daysLeft != null && daysLeft < 60) ...[
             const SizedBox(height: 8),
@@ -1427,8 +1426,8 @@ class _LicenseInfoCard extends StatelessWidget {
                 GestureDetector(
                   onTap: onRenew,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: AppColors.primary,
                       borderRadius: BorderRadius.circular(8),
@@ -1499,10 +1498,9 @@ class _InfoChip extends StatelessWidget {
             child: Text(
               label,
               style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: color),
-              overflow: TextOverflow.ellipsis,
+                  fontSize: 11, fontWeight: FontWeight.w600, color: color),
+              maxLines: 2,
+              overflow: TextOverflow.visible,
             ),
           ),
         ],
@@ -1544,8 +1542,7 @@ class _RenewalSheetState extends State<_RenewalSheet> {
     _licenseCount = widget.initialLicenses < 1 ? 1 : widget.initialLicenses;
   }
 
-  String _fmt(double v) =>
-      '${v.toStringAsFixed(2).replaceAll('.', ',')} €';
+  String _fmt(double v) => '${v.toStringAsFixed(2).replaceAll('.', ',')} €';
 
   @override
   Widget build(BuildContext context) {
@@ -1583,8 +1580,7 @@ class _RenewalSheetState extends State<_RenewalSheet> {
           const SizedBox(height: 4),
           Text(
             l10n.orgCannotReduceBelow,
-            style: TextStyle(
-                fontSize: 12, color: AppColors.hint(context)),
+            style: TextStyle(fontSize: 12, color: AppColors.hint(context)),
           ),
           const SizedBox(height: 20),
 
@@ -1668,8 +1664,8 @@ class _RenewalSheetState extends State<_RenewalSheet> {
             decoration: BoxDecoration(
               color: AppColors.primary.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.18)),
+              border:
+                  Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1699,8 +1695,7 @@ class _RenewalSheetState extends State<_RenewalSheet> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () =>
-                  widget.onConfirm(_billingCycle, _licenseCount),
+              onPressed: () => widget.onConfirm(_billingCycle, _licenseCount),
               icon: const Icon(Icons.payment_rounded),
               label: Text(l10n.renewOrgLicenses),
               style: ElevatedButton.styleFrom(
