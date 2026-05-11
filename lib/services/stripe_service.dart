@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -219,12 +220,15 @@ class StripeService {
     required String plan,
     required String billingCycle,
     required String userEmail,
+    int licenseCount = 1,
+    double? amount,
   }) async {
-    final amount = billingCycle == 'yearly'
+    final unitAmount = billingCycle == 'yearly'
         ? (_yearlyPrices[plan] ?? 0)
         : (_monthlyPrices[plan] ?? 0);
+    final rentAmount = amount ?? unitAmount * licenseCount;
 
-    if (amount == 0) {
+    if (rentAmount == 0) {
       return const PaymentCheckoutResult(
         success: false,
         errorCode: 'invalid_plan',
@@ -240,8 +244,9 @@ class StripeService {
       final result = await callable.call(<String, dynamic>{
         'plan': plan,
         'billingCycle': billingCycle,
-        'amount': amount,
+        'amount': rentAmount,
         'currency': 'eur',
+        'licenseCount': licenseCount,
       });
       final data = result.data as Map<String, dynamic>;
       clientSecret = data['clientSecret'] as String;
@@ -264,6 +269,15 @@ class StripeService {
           appearance: const PaymentSheetAppearance(
             colors: PaymentSheetAppearanceColors(primary: Color(0xFF0B3C5D)),
           ),
+          googlePay: const PaymentSheetGooglePay(
+            merchantCountryCode: 'FR',
+            currencyCode: 'EUR',
+            testEnv: kDebugMode,
+          ),
+          /*applePay: PaymentSheetApplePay(
+            merchantCountryCode: 'FR',
+            //merchantIdentifier: 'merchant.com.debouana.myleads',
+          ),*/
           // Required for redirect-based methods (Link, Amazon Pay, bank
           // redirects). Android declares this scheme in the intent-filter
           // so the deep link routes back to MainActivity.

@@ -40,13 +40,29 @@ exports.createPaymentIntent = onCall(
       throw new HttpsError('invalid-argument', `Unknown billing cycle: ${billingCycle}`);
     }
 
-    const amount = PRICES[plan][billingCycle];
+    const rawLicenseCount = request.data.licenseCount;
+    const licenseCount = rawLicenseCount == null ? 1 : Number(rawLicenseCount);
+    if (!Number.isInteger(licenseCount) || licenseCount < 1) {
+      throw new HttpsError('invalid-argument', 'licenseCount must be an integer >= 1');
+    }
+
+    const rawAmount = request.data.amount;
+    let amount;
+    if (rawAmount != null) {
+      const parsedAmount = Number(rawAmount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount < 1) {
+        throw new HttpsError('invalid-argument', 'amount must be a number >= 1');
+      }
+      amount = Math.round(parsedAmount);
+    } else {
+      amount = PRICES[plan][billingCycle] * licenseCount;
+    }
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount,
       currency,
       automatic_payment_methods: { enabled: true },
-      metadata: { plan, billingCycle },
+      metadata: { plan, billingCycle, licenseCount },
     });
 
     return {

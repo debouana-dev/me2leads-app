@@ -5,6 +5,10 @@ class Organization {
   final String ownerId; // admin's user id
   final String inviteCode; // 8-char alphanumeric code for joining
   final DateTime createdAt;
+  final int licenseCount;           // number of Business licenses purchased (includes admin)
+  final DateTime? orgPlanExpiresAt; // when org licenses expire
+  final String orgStatus;           // 'active' | 'suspended'
+  final DateTime? orgSuspendedAt;   // when org was suspended (for 6-month deletion timer)
 
   Organization({
     required this.id,
@@ -12,7 +16,23 @@ class Organization {
     required this.ownerId,
     required this.inviteCode,
     DateTime? createdAt,
+    this.licenseCount = 1,
+    this.orgPlanExpiresAt,
+    this.orgStatus = 'active',
+    this.orgSuspendedAt,
   }) : createdAt = createdAt ?? DateTime.now();
+
+  bool get isExpired =>
+      orgPlanExpiresAt != null && orgPlanExpiresAt!.isBefore(DateTime.now());
+
+  bool get isSuspended => orgStatus == 'suspended';
+
+  // True when the org has been suspended for ≥ 6 months without renewal →
+  // the cloud data is eligible for permanent deletion.
+  bool get isPastDeletionWindow =>
+      isSuspended &&
+      orgSuspendedAt != null &&
+      DateTime.now().difference(orgSuspendedAt!) >= const Duration(days: 180);
 
   Organization copyWith({
     String? id,
@@ -20,6 +40,11 @@ class Organization {
     String? ownerId,
     String? inviteCode,
     DateTime? createdAt,
+    int? licenseCount,
+    DateTime? orgPlanExpiresAt,
+    String? orgStatus,
+    DateTime? orgSuspendedAt,
+    bool clearOrgSuspendedAt = false,
   }) {
     return Organization(
       id: id ?? this.id,
@@ -27,6 +52,10 @@ class Organization {
       ownerId: ownerId ?? this.ownerId,
       inviteCode: inviteCode ?? this.inviteCode,
       createdAt: createdAt ?? this.createdAt,
+      licenseCount: licenseCount ?? this.licenseCount,
+      orgPlanExpiresAt: orgPlanExpiresAt ?? this.orgPlanExpiresAt,
+      orgStatus: orgStatus ?? this.orgStatus,
+      orgSuspendedAt: clearOrgSuspendedAt ? null : (orgSuspendedAt ?? this.orgSuspendedAt),
     );
   }
 }

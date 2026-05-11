@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/contact.dart';
@@ -43,36 +42,12 @@ class StorageService {
       final user = await DatabaseService.findUserById(userId);
       if (user != null && user.sessionToken == token) {
         _cachedUser = user;
-        // Seed a Business-plan test account on first install (idempotent).
-        await _seedTestAccount();
       } else {
         // Stale or invalidated session — wipe it.
         await _secure.delete(key: _kCurrentUserId);
         await _secure.delete(key: _kCurrentSessionToken);
       }
     }
-  }
-
-  static Future<void> _seedTestAccount() async {
-    const testEmail = 'test@debouana.com';
-    if (await DatabaseService.isEmailTaken(testEmail)) return;
-
-    final now = DateTime(2026, 1, 10, 9, 0, 0);
-    await DatabaseService.insertUser(UserAccount(
-      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      email: testEmail,
-      firstName: 'Sophie',
-      lastName: 'Martin',
-      phone: '+33612345678',
-      companyName: 'De Bouana SARL',
-      companyRole: 'Chef de Projet',
-      biography: 'Compte de test – plan Business.',
-      passwordHash: EncryptionService.hashPassword('Password@123'),
-      emailVerified: true,
-      plan: 'business',
-      createdAt: now,
-      passwordChangedAt: now,
-    ));
   }
 
   // -------- Session --------
@@ -107,6 +82,19 @@ class StorageService {
   /// Current user's subscription plan, read directly from the cached user row.
   /// Falls back to 'free' when no session is active.
   static String get userPlan => _cachedUser?.plan ?? 'free';
+
+  /// Effective plan: 'business' if the user belongs to an active organization,
+  /// otherwise the stored personal subscription plan.
+  static Future<String> getEffectivePlan() async {
+    final user = _cachedUser;
+    if (user == null) return 'free';
+    if (user.organizationId != null &&
+        await DatabaseService.isUserAssignedToOrganization(user.id) &&
+        await DatabaseService.isOrganizationActive(user.organizationId!)) {
+      return 'business';
+    }
+    return user.plan;
+  }
 
   /// Kept for backwards-compatibility. Plan changes should go through
   /// [AuthNotifier.changePlan], which persists to the database.

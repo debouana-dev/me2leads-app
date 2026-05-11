@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/contact.dart';
 import '../models/interaction.dart';
+import '../models/plan_features.dart';
 import '../services/database_service.dart';
 import '../services/notification_service.dart';
 import '../services/storage_service.dart';
@@ -103,8 +105,15 @@ class ContactsState {
 
 class ContactsNotifier extends StateNotifier<ContactsState> {
   ContactsNotifier() : super(const ContactsState()) {
-    _loadContacts();
+    _loadContacts().then((_) async {
+      _lastSyncAt = await DatabaseService.getUserLastSync(_ownerId);
+      _syncCheckTimer = Timer.periodic(
+          const Duration(seconds: 30), (_) => _checkForSyncUpdate());
+    });
   }
+
+  Timer? _syncCheckTimer;
+  String? _lastSyncAt;
 
   String get _ownerId => StorageService.currentUserId;
 
@@ -117,173 +126,39 @@ class ContactsNotifier extends StateNotifier<ContactsState> {
     final user = StorageService.currentUser;
     List<Contact> contacts;
     if (user?.organizationId != null) {
-      // Suspended members see only their own contacts (which includes any
-      // duplicate contacts that were not transferred to admin on suspension).
-      final memberStatus = await DatabaseService.getMemberStatus(
-        userId: _ownerId,
-        orgId: user!.organizationId!,
-      );
-      if (memberStatus == 'suspended') {
-        contacts = await StorageService.getAllContacts();
+      final orgActive =
+          await DatabaseService.isOrganizationActive(user!.organizationId!);
+      if (orgActive) {
+        // Suspended members see only their own contacts (which includes any
+        // duplicate contacts that were not transferred to admin on suspension).
+        final memberStatus = await DatabaseService.getMemberStatus(
+          userId: _ownerId,
+          orgId: user.organizationId!,
+        );
+        if (memberStatus == 'suspended') {
+          contacts = await StorageService.getAllContacts();
+        } else {
+          contacts = await DatabaseService.getAllContactsForOrganization(
+              user.organizationId!);
+        }
       } else {
-        // Active org member: shared view with org-level deduplication applied.
-        contacts = await DatabaseService.getAllContactsForOrganization(
-            user.organizationId!);
+        // Org is expired/suspended; fall back to the user's personal contact set.
+        contacts = await StorageService.getAllContacts();
       }
     } else {
       contacts = await StorageService.getAllContacts();
     }
-    if (contacts.isEmpty && user?.organizationId == null) {
-      await _seedDemoData();
-    } else {
-      state = state.copyWith(contacts: contacts, isLoading: false);
+
+    final effectivePlan = await StorageService.getEffectivePlan();
+    if (effectivePlan == 'free') {
+      contacts = contacts.take(PlanFeatures.free.maxContacts).toList();
     }
+
+    state = state.copyWith(contacts: contacts, isLoading: false);
   }
 
   /// Reloads contacts from disk (call after login).
   Future<void> reload() => _loadContacts();
-
-  Future<void> _seedDemoData() async {
-    final ownerId = _ownerId;
-    if (ownerId.isEmpty) {
-      state = state.copyWith(contacts: [], isLoading: false);
-      return;
-    }
-    final demoContacts = [
-      Contact(
-        id: _uuid.v4(),
-        ownerId: ownerId,
-        firstName: 'Karen',
-        lastName: 'Ambassa',
-        jobTitle: 'CEO',
-        company: 'GreenTech Cameroon',
-        phone: '+237699887766',
-        email: 'karen@greentech.cm',
-        source: 'Salon Luxembourg 2026',
-        project1: 'Partenariat Tech',
-        project1Budget: '25 000 €',
-        project2: 'Expansion Digitale',
-        project2Budget: '15 000 €',
-        notes:
-            'Rencontrée au salon Luxembourg. Très intéressée par un partenariat technologique.',
-        tags: ['Tech', 'CEO', 'Event'],
-        status: 'hot',
-        avatarColor: '0xFFE74C3C',
-        captureMethod: 'scan',
-        createdAt: DateTime.now().subtract(const Duration(days: 1)),
-      ),
-      Contact(
-        id: _uuid.v4(),
-        ownerId: ownerId,
-        firstName: 'Mike',
-        lastName: 'Investor',
-        jobTitle: 'Partner',
-        company: 'TechFund Africa',
-        phone: '+352621123456',
-        email: 'mike@techfund.africa',
-        source: 'Networking Event',
-        project1: 'Investissement Seed',
-        project1Budget: '50 000 €',
-        tags: ['Finance', 'Partner', 'Investor'],
-        status: 'warm',
-        avatarColor: '0xFFF39C12',
-        captureMethod: 'qr',
-        createdAt: DateTime.now().subtract(const Duration(days: 2)),
-      ),
-      Contact(
-        id: _uuid.v4(),
-        ownerId: ownerId,
-        firstName: 'Thomas',
-        lastName: 'Matouke',
-        jobTitle: 'CTO',
-        company: 'Digitech Solutions',
-        phone: '+237655443322',
-        email: 'thomas@digitech.cm',
-        source: 'Conférence IT',
-        project1: 'Intégration API',
-        project1Budget: '12 000 €',
-        project2: 'Migration Cloud',
-        project2Budget: '30 000 €',
-        tags: ['Tech', 'CTO'],
-        status: 'hot',
-        avatarColor: '0xFFD4AF37',
-        captureMethod: 'scan',
-        createdAt: DateTime.now().subtract(const Duration(days: 3)),
-      ),
-      Contact(
-        id: _uuid.v4(),
-        ownerId: ownerId,
-        firstName: 'Sophie',
-        lastName: 'Nguema',
-        jobTitle: 'Directrice Générale',
-        company: 'MediaCorp Gabon',
-        phone: '+241712345600',
-        email: 'sophie@mediacorp.ga',
-        source: 'Salon Digital',
-        tags: ['Media', 'Event'],
-        status: 'warm',
-        avatarColor: '0xFF8E44AD',
-        captureMethod: 'manual',
-        createdAt: DateTime.now().subtract(const Duration(days: 4)),
-      ),
-      Contact(
-        id: _uuid.v4(),
-        ownerId: ownerId,
-        firstName: 'Pierre',
-        lastName: 'Onana',
-        jobTitle: 'Directeur Commercial',
-        company: 'SNCI',
-        phone: '+237677665544',
-        email: 'pierre.onana@snci.cm',
-        project1: 'Contrat B2B',
-        project1Budget: '40 000 €',
-        tags: ['B2B', 'Priority'],
-        status: 'hot',
-        avatarColor: '0xFF2C3E50',
-        captureMethod: 'nfc',
-        createdAt: DateTime.now().subtract(const Duration(days: 5)),
-      ),
-    ];
-
-    for (final c in demoContacts) {
-      await DatabaseService.insertContact(c);
-    }
-
-    // Demo interactions for Karen
-    final karenId = demoContacts[0].id;
-    final interactions = [
-      Interaction(
-        id: _uuid.v4(),
-        ownerId: ownerId,
-        contactId: karenId,
-        type: 'meeting',
-        content: 'Rencontre au Salon Luxembourg',
-        createdAt: DateTime.now().subtract(const Duration(days: 1)),
-      ),
-      Interaction(
-        id: _uuid.v4(),
-        ownerId: ownerId,
-        contactId: karenId,
-        type: 'call',
-        content: 'Appel de suivi - 15 min',
-        createdAt: DateTime.now().subtract(const Duration(hours: 6)),
-      ),
-      Interaction(
-        id: _uuid.v4(),
-        ownerId: ownerId,
-        contactId: karenId,
-        type: 'email',
-        content: 'Email de proposition envoyé',
-        createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-      ),
-    ];
-
-    for (final i in interactions) {
-      await DatabaseService.insertInteraction(i);
-    }
-
-    state = state.copyWith(contacts: demoContacts, isLoading: false);
-  }
 
   void setSearchQuery(String query) {
     state = state.copyWith(searchQuery: query);
@@ -320,11 +195,20 @@ class ContactsNotifier extends StateNotifier<ContactsState> {
 
   // ============== CRUD ==============
 
+  static const String freeContactLimitError = 'free_contact_limit_reached';
+
   Future<ContactResult> addContact(Contact contact) async {
     final user = StorageService.currentUser;
     final ownerId = _ownerId;
     if (ownerId.isEmpty) {
       return const ContactResult.failure('Vous devez être connecté');
+    }
+
+    final effectivePlan = await StorageService.getEffectivePlan();
+    final planFeatures = PlanFeatures.fromString(effectivePlan);
+    if (!planFeatures.hasUnlimitedContacts &&
+        state.contacts.length >= planFeatures.maxContacts) {
+      return const ContactResult.failure(freeContactLimitError);
     }
 
     // Privilege check: can this user create contacts?
@@ -528,6 +412,21 @@ class ContactsNotifier extends StateNotifier<ContactsState> {
 
   Future<List<Interaction>> getInteractions(String contactId) {
     return DatabaseService.getInteractionsForContact(contactId);
+  }
+
+  Future<void> _checkForSyncUpdate() async {
+    if (_ownerId.isEmpty) return;
+    final currentSyncAt = await DatabaseService.getUserLastSync(_ownerId);
+    if (currentSyncAt != null && currentSyncAt != _lastSyncAt) {
+      _lastSyncAt = currentSyncAt;
+      await _loadContacts();
+    }
+  }
+
+  @override
+  void dispose() {
+    _syncCheckTimer?.cancel();
+    super.dispose();
   }
 }
 
