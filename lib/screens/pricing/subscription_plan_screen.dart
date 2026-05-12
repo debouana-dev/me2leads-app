@@ -108,6 +108,7 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
       final piId = recovery.result.paymentIntentId ?? '';
       final record = PaymentRecord(
         id: piId.isNotEmpty ? piId : _uuid.v4(),
+        transactionId: PaymentRecord.generateId(),
         userId: StorageService.currentUserId,
         plan: recovery.plan,
         billingCycle: recovery.billingCycle,
@@ -222,6 +223,7 @@ class _SubscriptionPlanScreenState extends ConsumerState<SubscriptionPlanScreen>
       final amount = _priceAmount(planId);
       final record = PaymentRecord(
         id: _uuid.v4(),
+        transactionId: PaymentRecord.generateId(),
         userId: StorageService.currentUserId,
         plan: planId,
         billingCycle: _billingCycle,

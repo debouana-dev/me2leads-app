@@ -90,6 +90,7 @@ class _CreateOrganizationScreenState
         id: result.paymentIntentId?.isNotEmpty == true
             ? result.paymentIntentId!
             : _uuid.v4(),
+        transactionId: PaymentRecord.generateId(),
         userId: StorageService.currentUserId,
         plan: 'business',
         billingCycle: _billingCycle,

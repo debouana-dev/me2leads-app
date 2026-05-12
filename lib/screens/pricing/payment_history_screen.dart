@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/l10n/app_l10n.dart';
 import '../../core/theme/app_colors.dart';
@@ -43,8 +44,8 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
           status = _TxStatus.pending;
       }
       return _Transaction(
-        id: r.stripePaymentIntentId.isNotEmpty
-            ? r.stripePaymentIntentId
+        id: r.transactionId.isNotEmpty
+            ? r.transactionId
             : r.id.substring(0, 8).toUpperCase(),
         plan: r.plan[0].toUpperCase() + r.plan.substring(1),
         billingCycle: r.billingCycle,
@@ -53,6 +54,7 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
         date: DateTime.tryParse(r.createdAt) ?? DateTime.now(),
         status: status,
         paymentMethod: r.paymentMethod,
+        record: r,
       );
     }).toList();
   }
@@ -316,7 +318,9 @@ class _TransactionCard extends StatelessWidget {
         ? l10n.billingCycleYearly
         : l10n.billingCycleMonthly;
 
-    return Container(
+    return GestureDetector(
+      onTap: () => context.push('/transaction-details', extra: transaction.record),
+      child: Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surfaceColor(context),
@@ -438,6 +442,7 @@ class _TransactionCard extends StatelessWidget {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -504,6 +509,7 @@ class _Transaction {
   final DateTime date;
   final _TxStatus status;
   final String paymentMethod;
+  final PaymentRecord record;
 
   const _Transaction({
     required this.id,
@@ -513,6 +519,7 @@ class _Transaction {
     required this.currency,
     required this.date,
     required this.status,
+    required this.record,
     this.paymentMethod = 'card',
   });
 }
