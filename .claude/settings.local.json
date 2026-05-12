@@ -14,7 +14,8 @@
       "PowerShell(dart pub cache list 2>$null)",
       "Bash(xargs grep *)",
       "Bash(Get-ChildItem \"C:\\\\Users\\\\munki\\\\AppData\\\\Local\\\\Pub\\\\Cache\\\\hosted\\\\pub.dev\" -Filter \"*stripe*\" -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "Bash(dart analyze *)"
     ]
   }
 }

@@ -445,6 +445,7 @@ class _OrganizationAdminScreenState
       id: result.paymentIntentId?.isNotEmpty == true
           ? result.paymentIntentId!
           : _renewalUuid.v4(),
+      transactionId: PaymentRecord.generateId(),
       userId: user.id,
       plan: 'business',
       billingCycle: billingCycle!,
