@@ -1,3 +1,5 @@
+import 'dart:math';
+
 // Sentinel used in copyWith to distinguish "not provided" from explicit null.
 const _sentinel = Object();
 
@@ -118,6 +120,7 @@ class UserAccount {
 /// Stripe payment record persisted in payment_history table.
 class PaymentRecord {
   final String id;
+  final String transactionId; // M2L + 7 digits, e.g. M2L4829103
   final String userId;
   final String plan; // 'premium' | 'business'
   final String billingCycle; // 'monthly' | 'yearly'
@@ -130,6 +133,7 @@ class PaymentRecord {
 
   const PaymentRecord({
     required this.id,
+    required this.transactionId,
     required this.userId,
     required this.plan,
     required this.billingCycle,
@@ -141,8 +145,16 @@ class PaymentRecord {
     required this.createdAt,
   });
 
+  /// Generates a unique transaction ID in the format M2L + 7 random digits.
+  static String generateId() {
+    final rand = Random();
+    final digits = List.generate(7, (_) => rand.nextInt(10)).join();
+    return 'M2L$digits';
+  }
+
   Map<String, dynamic> toRow() => {
         'id': id,
+        'transaction_id': transactionId,
         'user_id': userId,
         'plan': plan,
         'billing_cycle': billingCycle,
@@ -156,6 +168,7 @@ class PaymentRecord {
 
   static PaymentRecord fromRow(Map<String, dynamic> row) => PaymentRecord(
         id: row['id'] as String,
+        transactionId: row['transaction_id'] as String? ?? '',
         userId: row['user_id'] as String,
         plan: row['plan'] as String,
         billingCycle: row['billing_cycle'] as String,

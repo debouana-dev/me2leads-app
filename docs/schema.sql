@@ -209,6 +209,7 @@ CREATE INDEX IF NOT EXISTS "idx_org_members_user" ON "organization_members" ("us
 -- ============================================================
 CREATE TABLE IF NOT EXISTS "payment_history" (
   "id"                        VARCHAR(36)   NOT NULL,
+  "transaction_id"            VARCHAR(10)   NOT NULL DEFAULT '',
   "user_id"                   VARCHAR(36)   NOT NULL,
   "plan"                      VARCHAR(20)   NOT NULL,
   "billing_cycle"             VARCHAR(10)   NOT NULL,
@@ -279,6 +280,7 @@ ALTER TABLE "organizations"
 -- v13: Stripe payment history
 CREATE TABLE IF NOT EXISTS "payment_history" (
   "id"                        VARCHAR(36)   NOT NULL,
+  "transaction_id"            VARCHAR(10)   NOT NULL DEFAULT '',
   "user_id"                   VARCHAR(36)   NOT NULL,
   "plan"                      VARCHAR(20)   NOT NULL,
   "billing_cycle"             VARCHAR(10)   NOT NULL,
@@ -309,6 +311,10 @@ ALTER TABLE "organizations"
   ADD COLUMN IF NOT EXISTS "org_suspended_at"    VARCHAR(50) DEFAULT NULL;
 
 
+-- v19: human-readable transaction ID on payment records
+ALTER TABLE "payment_history"
+  ADD COLUMN IF NOT EXISTS "transaction_id" VARCHAR(10) NOT NULL DEFAULT '';
+
 -- ============================================================
 -- Schema version history
 -- ============================================================
@@ -331,4 +337,5 @@ ALTER TABLE "organizations"
 --         suspension, and 6-month cloud deletion lifecycle
 -- v18   : organization_members first_name + last_name + nickname + company +
 --         biography + photo_path — denormalized member profile fields for org display
+-- v19   : payment_history.transaction_id — human-readable receipt ID (M2L + 7 digits)
 -- ============================================================

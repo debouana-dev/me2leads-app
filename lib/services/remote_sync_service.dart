@@ -364,6 +364,7 @@ class RemoteSyncService {
     await conn.execute('''
       CREATE TABLE IF NOT EXISTS "payment_history" (
         "id"                        VARCHAR(36)   NOT NULL,
+        "transaction_id"            VARCHAR(10)   NOT NULL DEFAULT '',
         "user_id"                   VARCHAR(36)   NOT NULL,
         "plan"                      VARCHAR(20)   NOT NULL,
         "billing_cycle"             VARCHAR(10)   NOT NULL,
@@ -383,6 +384,12 @@ class RemoteSyncService {
     try {
       await conn.execute(
         "ALTER TABLE \"payment_history\" ADD COLUMN IF NOT EXISTS \"payment_method\" VARCHAR(50) NOT NULL DEFAULT 'card'",
+      );
+    } catch (_) {}
+    // v19: human-readable transaction ID on payment records.
+    try {
+      await conn.execute(
+        "ALTER TABLE \"payment_history\" ADD COLUMN IF NOT EXISTS \"transaction_id\" VARCHAR(10) NOT NULL DEFAULT ''",
       );
     } catch (_) {}
 
@@ -1460,10 +1467,10 @@ class RemoteSyncService {
     await conn.execute(
       Sql.named('''
         INSERT INTO "payment_history"
-          (id,user_id,plan,billing_cycle,amount,currency,status,
+          (id,transaction_id,user_id,plan,billing_cycle,amount,currency,status,
            stripe_payment_intent_id,payment_method,created_at)
         VALUES
-          (@id,@user_id,@plan,@billing_cycle,@amount,@currency,@status,
+          (@id,@transaction_id,@user_id,@plan,@billing_cycle,@amount,@currency,@status,
            @stripe_payment_intent_id,@payment_method,@created_at)
         ON CONFLICT (id) DO UPDATE SET
           status=EXCLUDED.status,
@@ -1471,6 +1478,7 @@ class RemoteSyncService {
       '''),
       parameters: {
         'id': r['id'],
+        'transaction_id': r['transaction_id'] ?? '',
         'user_id': r['user_id'],
         'plan': r['plan'],
         'billing_cycle': r['billing_cycle'],

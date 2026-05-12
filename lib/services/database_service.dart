@@ -27,7 +27,7 @@ import 'web_db_factory_stub.dart'
 class DatabaseService {
   static Database? _db;
   static const _dbName = 'myleads.db';
-  static const _dbVersion = 18;
+  static const _dbVersion = 19;
 
   // ── Remote sync callbacks ──────────────────────────────────────────────────
   static void Function(String table, Map<String, dynamic> row)? _onRemoteUpsert;
@@ -342,6 +342,13 @@ class DatabaseService {
             'ALTER TABLE organization_members ADD COLUMN photo_path TEXT');
       } catch (_) {}
     }
+    if (oldVersion < 19) {
+      // v19: human-readable transaction ID (M2L + 7 digits) on payment records.
+      try {
+        await db.execute(
+            "ALTER TABLE payment_history ADD COLUMN transaction_id TEXT NOT NULL DEFAULT ''");
+      } catch (_) {}
+    }
   }
 
   // =====================================================================
@@ -538,10 +545,11 @@ class DatabaseService {
     await db.execute(
         'CREATE INDEX idx_org_members_user ON organization_members(user_id)');
 
-    // ----- PAYMENT HISTORY (colonnes finales v13+v15 incluses dès la création) -----
+    // ----- PAYMENT HISTORY (colonnes finales v13+v15+v19 incluses dès la création) -----
     await db.execute('''
       CREATE TABLE payment_history (
         id TEXT PRIMARY KEY,
+        transaction_id TEXT NOT NULL DEFAULT '',
         user_id TEXT NOT NULL,
         plan TEXT NOT NULL,
         billing_cycle TEXT NOT NULL,

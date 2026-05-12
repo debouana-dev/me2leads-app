@@ -74,6 +74,7 @@ Future<void> _applyStartupPaymentRecovery() async {
   if (amount > 0) {
     await DatabaseService.insertPaymentRecord(PaymentRecord(
       id: piId.isNotEmpty ? piId : _uuid.v4(),
+      transactionId: PaymentRecord.generateId(),
       userId: user.id,
       plan: recovery.plan,
       billingCycle: recovery.billingCycle,
