@@ -1027,7 +1027,7 @@ class _MemberCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        member.role,
+                        member.email ?? '',
                         style: TextStyle(
                             fontSize: 12, color: AppColors.secondary(context)),
                         overflow: TextOverflow.ellipsis,
