@@ -1093,6 +1093,17 @@ class AppL10n {
   String get syncPlanGateBody => _en
       ? 'Cloud sync is available on Premium and Business plans. Back up your contacts and access them across all your devices.'
       : 'La synchronisation cloud est disponible sur les forfaits Premium et Business. Sauvegardez vos contacts et accédez-y sur tous vos appareils.';
+  String get ftpTestTitle =>
+      _en ? 'Test photo server' : 'Tester le serveur photos';
+  String get ftpTestDesc => _en
+      ? 'Check FTP connectivity for photo synchronization'
+      : 'Vérifier la connexion FTP pour la synchronisation des photos';
+  String get ftpTestSuccess => _en
+      ? 'FTP server reachable — photo sync is active'
+      : 'Serveur FTP accessible — la synchronisation des photos est active';
+  String get ftpTestFailed => _en
+      ? 'Cannot reach the FTP photo server'
+      : 'Impossible de joindre le serveur FTP des photos';
 
   // ─── Currency helpers ─────────────────────────────────────────────────────
   // [eurToTargetRate] is the live EUR → target-currency rate (e.g. 1.08 for USD).

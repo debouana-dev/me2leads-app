@@ -142,15 +142,15 @@ class AppConfig {
   static String get ftpHost => _deobfuscate(const [
         43,
         13,
-        44,
-        91,
+        60,  // was 44 → decoded '`', corrected to encode 'p'
+        75,  // was 91 → decoded '>', corrected to encode '.'
         2,
         8,
         6,
-        81,
+        65,  // was 81 → decoded 'c', corrected to encode 's'
         68,
         87,
-        84,
+        68,  // was 84 → decoded 'b', corrected to encode 'r'
         98,
         85,
         83,
@@ -178,7 +178,7 @@ class AppConfig {
         39,
         26,
         39,
-        4,
+        8,  // was 4 → decoded 'a', corrected to encode 'm'
         15,
         28,
         0,
@@ -202,8 +202,8 @@ class AppConfig {
         51,
         57,
         2,
-        17,
-        94,
+        113,
+        126,
         98,
         17,
       ]);

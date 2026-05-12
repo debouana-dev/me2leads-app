@@ -1,3 +1,6 @@
+import 'dart:io' show SocketException;
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ftpconnect/ftpconnect.dart';
 import 'package:path/path.dart' as p;
@@ -19,6 +22,11 @@ class FtpPhotoService {
   FtpPhotoService._();
 
   static const String _remoteRoot = 'photos';
+
+  // Security type discovered on the first successful connection.
+  // Null means auto-detect (tries plain FTP then explicit FTPS).
+  // Cached for the app session to avoid redundant failed attempts.
+  static SecurityType? _cachedSecurityType;
 
   // ── Public API ──────────────────────────────────────────────────────────
 
@@ -82,19 +90,58 @@ class FtpPhotoService {
     });
   }
 
+  /// Verifies that the FTP server is reachable and the [_remoteRoot] directory
+  /// can be accessed (or created).
+  ///
+  /// Returns `null` on success, `'no_connection'` when the device has no
+  /// internet, or `'auth_failed'` for any FTP-level failure (wrong
+  /// credentials, host unreachable, SSL mismatch, etc.).
+  static Future<String?> testFtpConnection() async {
+    if (kIsWeb) return 'unsupported_platform';
+    final connectivity = await Connectivity().checkConnectivity();
+    if (connectivity.contains(ConnectivityResult.none)) return 'no_connection';
+    final ok =
+        await _withConnection((ftp) async => _mkcd(ftp, _remoteRoot));
+    return ok ? null : 'auth_failed';
+  }
+
   // ── Internals ────────────────────────────────────────────────────────────
 
-  /// Opens a connection, runs [action], then disconnects.
-  /// Returns false on connection failure; swallows all action errors.
+  /// Auto-detecting connection wrapper.
+  ///
+  /// Tries plain FTP first; if that fails, retries with Explicit FTPS
+  /// (SecurityType.FTPES — AUTH TLS on port 21), which OVH shared hosting
+  /// and many other providers require.  The working type is cached for the
+  /// rest of the app session so subsequent calls pay only one connection.
   static Future<bool> _withConnection(
       Future<bool> Function(FTPConnect ftp) action) async {
+    if (_cachedSecurityType != null) {
+      return _withConnectionOnce(action, _cachedSecurityType!);
+    }
+    for (final type in [SecurityType.ftp, SecurityType.ftpes]) {
+      final ok = await _withConnectionOnce(action, type);
+      if (ok) {
+        _cachedSecurityType = type;
+        debugPrint('FtpPhotoService: using $type (cached for this session)');
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Opens a single connection with [securityType], runs [action], then
+  /// disconnects.  Returns false on any failure; never throws.
+  static Future<bool> _withConnectionOnce(
+      Future<bool> Function(FTPConnect ftp) action,
+      SecurityType securityType) async {
     final ftp = FTPConnect(
       AppConfig.ftpHost,
       port: AppConfig.ftpPort,
       user: AppConfig.ftpUsername,
       pass: AppConfig.ftpPassword,
-      showLog: false,
-      timeout: 90000, // 90s is a reasonable upper bound for mobile FTP ops
+      showLog: kDebugMode, // FTP protocol transcript visible in debug console
+      timeout: 30,
+      securityType: securityType,
     );
     try {
       final connected = await ftp.connect();
@@ -102,15 +149,18 @@ class FtpPhotoService {
       try {
         return await action(ftp);
       } catch (e) {
-        debugPrint('FtpPhotoService error: $e');
+        debugPrint('FtpPhotoService action error [$securityType]: $e');
         return false;
       } finally {
         try {
           await ftp.disconnect();
         } catch (_) {}
       }
+    } on SocketException catch (e) {
+      debugPrint('FtpPhotoService socket error [$securityType]: $e');
+      return false;
     } catch (e) {
-      debugPrint('FtpPhotoService connect error: $e');
+      debugPrint('FtpPhotoService connect error [$securityType]: $e');
       return false;
     }
   }

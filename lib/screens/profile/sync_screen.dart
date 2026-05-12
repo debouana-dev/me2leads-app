@@ -8,6 +8,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/database_service.dart';
+import '../../services/ftp_photo_service.dart';
 import '../../services/remote_sync_service.dart';
 import '../../services/storage_service.dart';
 
@@ -24,6 +25,8 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
   _SyncState _state = _SyncState.idle;
   SyncResult? _lastResult;
   String? _lastSyncAt;
+  _SyncState _ftpState = _SyncState.idle;
+  String? _ftpErrorCode;
 
   @override
   void initState() {
@@ -56,6 +59,11 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       default:
         return l10n.syncErrUnknown;
     }
+  }
+
+  String _ftpErrorMessage(String? code, AppL10n l10n) {
+    if (code == 'no_connection') return l10n.syncErrNoConnection;
+    return l10n.ftpTestFailed;
   }
 
   Future<void> _runPush() async {
@@ -114,6 +122,20 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       setState(() {
         _state = result.success ? _SyncState.success : _SyncState.error;
         _lastResult = result;
+      });
+    }
+  }
+
+  Future<void> _runFtpTest() async {
+    setState(() {
+      _ftpState = _SyncState.loading;
+      _ftpErrorCode = null;
+    });
+    final error = await FtpPhotoService.testFtpConnection();
+    if (mounted) {
+      setState(() {
+        _ftpState = error == null ? _SyncState.success : _SyncState.error;
+        _ftpErrorCode = error;
       });
     }
   }
