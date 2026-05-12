@@ -928,8 +928,15 @@ class AppL10n {
       ? 'Exporting contacts is reserved for Premium and Business subscribers.'
       : 'L’export des contacts est réservé aux abonnés Premium et Business.';
   String get freeContactLimitReached => _en
-      ? 'Free plan users can save up to 10 contacts.'
-      : 'Les utilisateurs du plan gratuit peuvent enregistrer jusqu’à 10 contacts.';
+      ? "Free plan users can save up to 10 contacts."
+      : "Les utilisateurs du plan gratuit peuvent enregistrer jusqu’à 10 contacts.";
+
+  String get importCreatePrivilegeLocked => _en
+      ? "Your admin has restricted your permission to create contacts. Import is not available."
+      : "Votre administrateur a restreint votre permission de créer des contacts. L’importation n’est pas disponible.";
+  String get importCreatePrivilegeLockedInfo => _en
+      ? 'Importing contacts requires the "Create contacts" privilege. Ask your organization admin to grant it.'
+      : "L’importation de contacts nécessite le privilège \"Créer des contacts\". Demandez à votre administrateur de vous l’accorder.";
 
   String importSuccess(int created, int skipped) {
     final base = _en
@@ -1093,6 +1100,17 @@ class AppL10n {
   String get syncPlanGateBody => _en
       ? 'Cloud sync is available on Premium and Business plans. Back up your contacts and access them across all your devices.'
       : 'La synchronisation cloud est disponible sur les forfaits Premium et Business. Sauvegardez vos contacts et accédez-y sur tous vos appareils.';
+  String get ftpTestTitle =>
+      _en ? 'Test photo server' : 'Tester le serveur photos';
+  String get ftpTestDesc => _en
+      ? 'Check FTP connectivity for photo synchronization'
+      : 'Vérifier la connexion FTP pour la synchronisation des photos';
+  String get ftpTestSuccess => _en
+      ? 'FTP server reachable — photo sync is active'
+      : 'Serveur FTP accessible — la synchronisation des photos est active';
+  String get ftpTestFailed => _en
+      ? 'Cannot reach the FTP photo server'
+      : 'Impossible de joindre le serveur FTP des photos';
 
   // ─── Currency helpers ─────────────────────────────────────────────────────
   // [eurToTargetRate] is the live EUR → target-currency rate (e.g. 1.08 for USD).
