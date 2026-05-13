@@ -273,6 +273,7 @@ class AppL10n {
   String get editButton => _en ? 'Edit' : 'Modifier';
   String get deleteButton => _en ? 'Delete' : 'Supprimer';
   String get shareButton => _en ? 'Share' : 'Partager';
+  String get createReminderButton => _en ? 'Reminder' : 'Rappel';
   String get contactNotFound =>
       _en ? 'Contact not found' : 'Contact non trouvé';
   String get back => _en ? 'Back' : 'Retour';
