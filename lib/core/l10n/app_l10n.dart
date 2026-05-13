@@ -388,6 +388,14 @@ class AppL10n {
   String get repeatDaily => _en ? 'Every day' : 'Chaque jour';
   String get repeatWeekly => _en ? 'Every week' : 'Chaque semaine';
   String get repeatMonthly => _en ? 'Every month' : 'Chaque mois';
+  String get repeatCustom => _en ? 'Custom...' : 'Personnaliser...';
+  String get customRepeatValue => _en ? 'Value' : 'Valeur';
+  String get customRepeatUnit => _en ? 'Unit' : 'Unité';
+  String get unitMinutes => _en ? 'Minutes' : 'Minutes';
+  String get unitHours => _en ? 'Hours' : 'Heures';
+  String get unitDays => _en ? 'Days' : 'Jours';
+  String get unitWeeks => _en ? 'Weeks' : 'Semaines';
+  String get unitMonths => _en ? 'Months' : 'Mois';
   String get actionCall => _en ? 'Call' : 'Appeler';
   String get actionSms => 'SMS';
   String get actionWhatsapp => 'WhatsApp';

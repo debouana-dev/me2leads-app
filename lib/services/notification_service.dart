@@ -735,13 +735,26 @@ class NotificationService {
   /// Maps a repeat frequency string to its [Duration] equivalent.
   /// Returns null for null or unknown values (treated as "no repeat").
   static Duration? _frequencyToDuration(String? frequency) {
-    switch (frequency) {
-      case '30m': return const Duration(minutes: 30);
-      case '1h':  return const Duration(hours: 1);
-      case '1d':  return const Duration(days: 1);
-      case '1w':  return const Duration(days: 7);
-      case '1mo': return const Duration(days: 30);
-      default:    return null;
+    if (frequency == null) return null;
+    final match = RegExp(r'^(\d+)(m|h|d|w|mo)$').firstMatch(frequency);
+    if (match == null) return null;
+
+    final value = int.tryParse(match.group(1)!) ?? 0;
+    final unit = match.group(2);
+
+    switch (unit) {
+      case 'm':
+        return Duration(minutes: value);
+      case 'h':
+        return Duration(hours: value);
+      case 'd':
+        return Duration(days: value);
+      case 'w':
+        return Duration(days: value * 7);
+      case 'mo':
+        return Duration(days: value * 30);
+      default:
+        return null;
     }
   }
 
