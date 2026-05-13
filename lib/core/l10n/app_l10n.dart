@@ -693,6 +693,8 @@ class AppL10n {
       _en ? 'OVERDUE REMINDER' : 'RAPPEL EN RETARD';
   String get upcomingReminderBadge =>
       _en ? 'UPCOMING REMINDER' : 'RAPPEL À VENIR';
+  String get repeatReminderBadge =>
+      _en ? 'RECURRING REMINDER' : 'RAPPEL RÉCURRENT';
   String get incompleteProfileBadge =>
       _en ? 'INCOMPLETE PROFILE' : 'PROFIL INCOMPLET';
   String get notificationLabel => _en ? 'NOTIFICATION' : 'NOTIFICATION';
