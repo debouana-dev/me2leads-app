@@ -135,6 +135,21 @@ class OrgNotifier extends StateNotifier<OrgState> {
       );
       final uniqueCount =
           await DatabaseService.getOrgDeduplicatedContactCount(org.id);
+
+      // Migration: re-encrypt any personal-key contacts to the org key for
+      // active members. Idempotent — already org-encrypted contacts are skipped.
+      final memberStatus = await DatabaseService.getMemberStatus(
+        userId: user.id,
+        orgId: org.id,
+      );
+      if (memberStatus == 'active') {
+        await DatabaseService.reencryptUserContactsToOrgKey(
+          userId: user.id,
+          orgId: org.id,
+          userEmail: user.email,
+        );
+      }
+
       state = state.copyWith(
         isLoading: false,
         organization: org,
@@ -263,6 +278,13 @@ class OrgNotifier extends StateNotifier<OrgState> {
       await DatabaseService.updateUser(updated);
       await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
 
+      // Re-encrypt admin's personal contacts to the new org key.
+      await DatabaseService.reencryptUserContactsToOrgKey(
+        userId: user.id,
+        orgId: orgId,
+        userEmail: user.email,
+      );
+
       final members = await DatabaseService.getMembersForOrganization(orgId);
       state = state.copyWith(
         isLoading: false,
@@ -371,6 +393,13 @@ class OrgNotifier extends StateNotifier<OrgState> {
       await StorageService.setCurrentSession(updated, user.sessionToken ?? '');
       await scheduleBusinessSync();
 
+      // Re-encrypt the joining member's personal contacts to the org key.
+      await DatabaseService.reencryptUserContactsToOrgKey(
+        userId: user.id,
+        orgId: org.id,
+        userEmail: user.email,
+      );
+
       final members = await DatabaseService.getMembersForOrganization(org.id);
       final privs = await DatabaseService.getMemberPrivileges(
           userId: user.id, orgId: org.id);
@@ -399,8 +428,21 @@ class OrgNotifier extends StateNotifier<OrgState> {
       return "Utilisez \"Quitter l'organisation\" pour vous retirer";
 
     try {
+      final target = state.members.firstWhere(
+        (m) => m.userId == targetUserId,
+        orElse: () => throw Exception('Membre introuvable'),
+      );
       await DatabaseService.transferNonDuplicateContactsToAdmin(
           fromUserId: targetUserId, orgId: org.id);
+      // Re-encrypt the removed member's remaining contacts to their personal key
+      // so they can still access them after removal.
+      if (target.email != null && target.email!.isNotEmpty) {
+        await DatabaseService.reencryptUserContactsToPersonalKey(
+          userId: targetUserId,
+          orgId: org.id,
+          userEmail: target.email!,
+        );
+      }
       await DatabaseService.removeOrgMember(org.id, targetUserId);
 
       await refreshMembers();
@@ -426,6 +468,12 @@ class OrgNotifier extends StateNotifier<OrgState> {
       }
 
       if (isLastAdmin && state.members.length <= 1) {
+        // Re-encrypt admin's contacts to personal key before the org is deleted.
+        await DatabaseService.reencryptUserContactsToPersonalKey(
+          userId: user.id,
+          orgId: org.id,
+          userEmail: user.email,
+        );
         await DatabaseService.deleteOrganization(org.id);
         final downgraded = user.copyWith(
           organizationId: null,
@@ -441,6 +489,12 @@ class OrgNotifier extends StateNotifier<OrgState> {
       } else {
         await DatabaseService.transferNonDuplicateContactsToAdmin(
             fromUserId: user.id, orgId: org.id);
+        // Re-encrypt remaining (non-transferred) contacts to personal key.
+        await DatabaseService.reencryptUserContactsToPersonalKey(
+          userId: user.id,
+          orgId: org.id,
+          userEmail: user.email,
+        );
         await DatabaseService.removeOrgMember(org.id, user.id);
         final updated = user.copyWith(
           organizationId: null,
@@ -474,6 +528,15 @@ class OrgNotifier extends StateNotifier<OrgState> {
       final members = await DatabaseService.getMembersForOrganization(org.id);
       for (final m in members) {
         if (m.userId == user.id) continue; // admin handled below
+        // Re-encrypt each member's contacts to their personal key before the
+        // org is deleted, so they retain access to their own contact data.
+        if (m.email != null && m.email!.isNotEmpty) {
+          await DatabaseService.reencryptUserContactsToPersonalKey(
+            userId: m.userId,
+            orgId: org.id,
+            userEmail: m.email!,
+          );
+        }
         final memberUser = await DatabaseService.findUserById(m.userId);
         if (memberUser != null) {
           await DatabaseService.updateUser(memberUser.copyWith(
@@ -482,6 +545,13 @@ class OrgNotifier extends StateNotifier<OrgState> {
           ));
         }
       }
+
+      // Re-encrypt admin's own contacts to personal key before deleting.
+      await DatabaseService.reencryptUserContactsToPersonalKey(
+        userId: user.id,
+        orgId: org.id,
+        userEmail: user.email,
+      );
 
       await DatabaseService.deleteOrganization(org.id);
 
@@ -520,6 +590,15 @@ class OrgNotifier extends StateNotifier<OrgState> {
     try {
       await DatabaseService.transferNonDuplicateContactsToAdmin(
           fromUserId: targetUserId, orgId: org.id);
+      // Re-encrypt the suspended member's remaining contacts to their personal
+      // key so they can access them if/when they are fully removed.
+      if (target.email != null && target.email!.isNotEmpty) {
+        await DatabaseService.reencryptUserContactsToPersonalKey(
+          userId: targetUserId,
+          orgId: org.id,
+          userEmail: target.email!,
+        );
+      }
       await DatabaseService.updateMemberStatus(
           orgId: org.id, userId: targetUserId, status: 'suspended');
       await refreshMembers();
@@ -542,8 +621,20 @@ class OrgNotifier extends StateNotifier<OrgState> {
     final org = state.organization;
     if (org == null) return 'Aucune organisation';
     try {
+      final target = state.members.firstWhere(
+        (m) => m.userId == targetUserId,
+        orElse: () => throw Exception('Membre introuvable'),
+      );
       await DatabaseService.updateMemberStatus(
           orgId: org.id, userId: targetUserId, status: 'active');
+      // Re-encrypt the reactivated member's contacts back to the org key.
+      if (target.email != null && target.email!.isNotEmpty) {
+        await DatabaseService.reencryptUserContactsToOrgKey(
+          userId: targetUserId,
+          orgId: org.id,
+          userEmail: target.email!,
+        );
+      }
       await refreshMembers();
       return null;
     } catch (e) {

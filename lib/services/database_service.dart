@@ -41,6 +41,15 @@ class DatabaseService {
     _onRemoteDelete = onDelete;
   }
 
+  // ── Active org context (set by StorageService on session changes) ──────────
+  // Avoids a circular import with StorageService while still giving
+  // _contactToRow / _contactFromRow access to the current user's org ID.
+  static String? _activeOrgId;
+
+  static void setActiveOrgId(String? orgId) {
+    _activeOrgId = (orgId != null && orgId.isNotEmpty) ? orgId : null;
+  }
+
   static Future<Database> get database async {
     _db ??= await _initDb();
     return _db!;
@@ -922,40 +931,73 @@ class DatabaseService {
     return rows.isNotEmpty;
   }
 
-  static Map<String, dynamic> _contactToRow(Contact c) => {
-        'id': c.id,
-        'owner_id': c.ownerId,
-        'first_name': c.firstName,
-        'last_name': c.lastName,
-        'job_title': c.jobTitle,
-        'company': c.company,
-        'phone': c.phone,
-        'email': c.email,
-        'phone_lookup': (c.phone != null && c.phone!.trim().isNotEmpty)
-            ? _hashLookup(Validators.normalizePhone(c.phone))
-            : null,
-        'email_lookup': (c.email != null && c.email!.trim().isNotEmpty)
-            ? _hashLookup(Validators.normalizeEmail(c.email))
-            : null,
-        'source': c.source,
-        'project_1': c.project1,
-        'project_1_budget': c.project1Budget,
-        'project_2': c.project2,
-        'project_2_budget': c.project2Budget,
-        'interest': c.interest,
-        'notes': c.notes,
-        'tags': jsonEncode(c.tags),
-        'status': c.status,
-        'created_at': c.createdAt.toIso8601String(),
-        'last_contact_date': c.lastContactDate?.toIso8601String(),
-        'avatar_color': c.avatarColor,
-        'capture_method': c.captureMethod,
-        'photo_path': c.photoPath,
-      };
+  /// Returns the org ID to use as encryption key material when the current
+  /// user is an active org member, or null for personal (email-key) encryption.
+  static String? _currentOrgKeyMaterial() => _activeOrgId;
 
-  static Contact _contactFromRow(Map<String, dynamic> row) {
+  /// Encrypts a contact field using [km] (org key material) when provided,
+  /// or the session (personal email) key otherwise.
+  static String _encField(String plain, String? km) => km != null
+      ? EncryptionService.encryptTextWithKeyMaterial(plain, km)
+      : EncryptionService.encryptText(plain);
+
+  /// Decrypts a contact field: tries org key first (if [orgId] is known or the
+  /// active org is set), then falls back to the session (personal) key.
+  /// Returns '' if both attempts fail.
+  static String _decField(String? cipher, String? orgId) {
+    if (cipher == null || cipher.isEmpty) return '';
+    final km = orgId ?? _activeOrgId;
+    if (km != null) {
+      final r = EncryptionService.decryptTextWithKeyMaterial(cipher, km);
+      if (r.isNotEmpty) return r;
+    }
+    return EncryptionService.decryptText(cipher);
+  }
+
+  static Map<String, dynamic> _contactToRow(Contact c,
+      {String? keyMaterial}) {
+    final km = keyMaterial ?? _currentOrgKeyMaterial();
+    return {
+      'id': c.id,
+      'owner_id': c.ownerId,
+      'first_name': c.firstName,
+      'last_name': c.lastName,
+      'job_title': c.jobTitle,
+      'company': c.company,
+      'phone': c.phone != null ? _encField(c.phone!, km) : null,
+      'email': c.email != null ? _encField(c.email!, km) : null,
+      'phone_lookup': (c.phone != null && c.phone!.trim().isNotEmpty)
+          ? _hashLookup(Validators.normalizePhone(c.phone))
+          : null,
+      'email_lookup': (c.email != null && c.email!.trim().isNotEmpty)
+          ? _hashLookup(Validators.normalizeEmail(c.email))
+          : null,
+      'source': c.source,
+      'project_1': c.project1,
+      'project_1_budget': c.project1Budget,
+      'project_2': c.project2,
+      'project_2_budget': c.project2Budget,
+      'interest': c.interest,
+      'notes': c.notes,
+      'tags': jsonEncode(c.tags),
+      'status': c.status,
+      'created_at': c.createdAt.toIso8601String(),
+      'last_contact_date': c.lastContactDate?.toIso8601String(),
+      'avatar_color': c.avatarColor,
+      'capture_method': c.captureMethod,
+      'photo_path': c.photoPath,
+    };
+  }
+
+  static Contact _contactFromRow(Map<String, dynamic> row, {String? orgId}) {
     final phoneEnc = row['phone'] as String?;
     final emailEnc = row['email'] as String?;
+    final phonePlain = (phoneEnc != null && phoneEnc.isNotEmpty)
+        ? _decField(phoneEnc, orgId)
+        : '';
+    final emailPlain = (emailEnc != null && emailEnc.isNotEmpty)
+        ? _decField(emailEnc, orgId)
+        : '';
     return Contact(
       id: row['id'] as String,
       ownerId: row['owner_id'] as String? ?? '',
@@ -963,12 +1005,8 @@ class DatabaseService {
       lastName: row['last_name'] as String,
       jobTitle: row['job_title'] as String?,
       company: row['company'] as String?,
-      phone: (phoneEnc != null && phoneEnc.isNotEmpty)
-          ? EncryptionService.decryptText(phoneEnc)
-          : null,
-      email: (emailEnc != null && emailEnc.isNotEmpty)
-          ? EncryptionService.decryptText(emailEnc)
-          : null,
+      phone: phonePlain.isEmpty ? null : phonePlain,
+      email: emailPlain.isEmpty ? null : emailPlain,
       source: row['source'] as String?,
       project1: row['project_1'] as String?,
       project1Budget: row['project_1_budget'] as String?,
@@ -1631,7 +1669,7 @@ class DatabaseService {
       final isDuplicate =
           (phoneLookup != null && !seenPhone.add(phoneLookup)) ||
               (emailLookup != null && !seenEmail.add(emailLookup));
-      if (!isDuplicate) result.add(_contactFromRow(row));
+      if (!isDuplicate) result.add(_contactFromRow(row, orgId: orgId));
     }
     return result;
   }
@@ -1989,6 +2027,166 @@ class DatabaseService {
             .query('contacts', where: 'owner_id = ?', whereArgs: [ownerId]))
         .map((r) => Map<String, dynamic>.from(r))
         .toList();
+  }
+
+  // ── Contact re-encryption helpers ────────────────────────────────────────
+
+  /// Re-encrypts all contacts owned by [userId] from their personal email key
+  /// to the org key. Called when the user joins or creates an organisation.
+  /// Idempotent: contacts already on the org key cannot be decrypted by the
+  /// personal key, so they are skipped without modification.
+  static Future<void> reencryptUserContactsToOrgKey({
+    required String userId,
+    required String orgId,
+    required String userEmail,
+  }) async {
+    final db = await database;
+    final rows =
+        await db.query('contacts', where: 'owner_id = ?', whereArgs: [userId]);
+    if (rows.isEmpty) return;
+
+    final personalKM = userEmail.toLowerCase().trim();
+    final updatedIds = <String>[];
+
+    await db.transaction((txn) async {
+      for (final row in rows) {
+        final id = row['id'] as String;
+        final updates = <String, Object?>{};
+        for (final field in ['phone', 'email']) {
+          final cipher = row[field] as String?;
+          if (cipher == null || cipher.isEmpty) continue;
+          final plain =
+              EncryptionService.decryptTextWithKeyMaterial(cipher, personalKM);
+          if (plain.isNotEmpty) {
+            updates[field] =
+                EncryptionService.encryptTextWithKeyMaterial(plain, orgId);
+          }
+        }
+        if (updates.isNotEmpty) {
+          await txn.update('contacts', updates,
+              where: 'id = ?', whereArgs: [id]);
+          updatedIds.add(id);
+        }
+      }
+    });
+
+    if (_onRemoteUpsert != null) {
+      for (final id in updatedIds) {
+        final updated = await db
+            .query('contacts', where: 'id = ?', whereArgs: [id], limit: 1);
+        if (updated.isNotEmpty) {
+          _onRemoteUpsert!(
+              'contacts', Map<String, dynamic>.from(updated.first));
+        }
+      }
+    }
+  }
+
+  /// Re-encrypts all contacts owned by [userId] from the org key back to their
+  /// personal email key. Called when a user leaves, is removed, or is suspended
+  /// from an org. Also called by the admin on behalf of a departing member
+  /// (the admin can derive the member's personal key from their email).
+  static Future<void> reencryptUserContactsToPersonalKey({
+    required String userId,
+    required String orgId,
+    required String userEmail,
+  }) async {
+    final db = await database;
+    final rows =
+        await db.query('contacts', where: 'owner_id = ?', whereArgs: [userId]);
+    if (rows.isEmpty) return;
+
+    final personalKM = userEmail.toLowerCase().trim();
+    final updatedIds = <String>[];
+
+    await db.transaction((txn) async {
+      for (final row in rows) {
+        final id = row['id'] as String;
+        final updates = <String, Object?>{};
+        for (final field in ['phone', 'email']) {
+          final cipher = row[field] as String?;
+          if (cipher == null || cipher.isEmpty) continue;
+          final plain =
+              EncryptionService.decryptTextWithKeyMaterial(cipher, orgId);
+          if (plain.isNotEmpty) {
+            updates[field] =
+                EncryptionService.encryptTextWithKeyMaterial(plain, personalKM);
+          }
+        }
+        if (updates.isNotEmpty) {
+          await txn.update('contacts', updates,
+              where: 'id = ?', whereArgs: [id]);
+          updatedIds.add(id);
+        }
+      }
+    });
+
+    if (_onRemoteUpsert != null) {
+      for (final id in updatedIds) {
+        final updated = await db
+            .query('contacts', where: 'id = ?', whereArgs: [id], limit: 1);
+        if (updated.isNotEmpty) {
+          _onRemoteUpsert!(
+              'contacts', Map<String, dynamic>.from(updated.first));
+        }
+      }
+    }
+  }
+
+  /// Re-encrypts all contacts owned by [userId] from [oldEmail]-derived key to
+  /// [newEmail]-derived key. Called after a successful email address change.
+  /// No-op for org members — their contacts use the org key, not the email key.
+  static Future<void> reencryptUserContactsAfterEmailChange({
+    required String userId,
+    required String oldEmail,
+    required String newEmail,
+  }) async {
+    // Org members' contacts are encrypted with the org key, not the email key.
+    if (_activeOrgId != null) return;
+
+    final oldKM = oldEmail.toLowerCase().trim();
+    final newKM = newEmail.toLowerCase().trim();
+    if (oldKM == newKM) return;
+
+    final db = await database;
+    final rows =
+        await db.query('contacts', where: 'owner_id = ?', whereArgs: [userId]);
+    if (rows.isEmpty) return;
+
+    final updatedIds = <String>[];
+
+    await db.transaction((txn) async {
+      for (final row in rows) {
+        final id = row['id'] as String;
+        final updates = <String, Object?>{};
+        for (final field in ['phone', 'email']) {
+          final cipher = row[field] as String?;
+          if (cipher == null || cipher.isEmpty) continue;
+          final plain =
+              EncryptionService.decryptTextWithKeyMaterial(cipher, oldKM);
+          if (plain.isNotEmpty) {
+            updates[field] =
+                EncryptionService.encryptTextWithKeyMaterial(plain, newKM);
+          }
+        }
+        if (updates.isNotEmpty) {
+          await txn.update('contacts', updates,
+              where: 'id = ?', whereArgs: [id]);
+          updatedIds.add(id);
+        }
+      }
+    });
+
+    if (_onRemoteUpsert != null) {
+      for (final id in updatedIds) {
+        final updated = await db
+            .query('contacts', where: 'id = ?', whereArgs: [id], limit: 1);
+        if (updated.isNotEmpty) {
+          _onRemoteUpsert!(
+              'contacts', Map<String, dynamic>.from(updated.first));
+        }
+      }
+    }
   }
 
   static Future<List<Map<String, dynamic>>> getRawReminderRows(

@@ -110,22 +110,21 @@ class _AccountSecurityScreenState
       _isSendingCode = true;
       _emailChangeError = null;
     });
-    try {
-      await ref.read(authProvider.notifier).sendVerificationCode(_newEmailCtrl.text.trim());
-      if (mounted) {
-        setState(() {
-          _codeSent = true;
-          _isSendingCode = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isSendingCode = false;
-          _emailChangeError = e.toString();
-        });
-      }
+    final error = await ref
+        .read(authProvider.notifier)
+        .initiateEmailChange(_newEmailCtrl.text.trim());
+    if (!mounted) return;
+    if (error != null) {
+      setState(() {
+        _isSendingCode = false;
+        _emailChangeError = error;
+      });
+      return;
     }
+    setState(() {
+      _codeSent = true;
+      _isSendingCode = false;
+    });
   }
 
   Future<void> _onConfirmEmailChange(AppL10n l10n) async {
