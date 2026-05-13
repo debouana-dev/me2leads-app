@@ -687,8 +687,11 @@ class RemoteSyncService {
       return SyncResult.err('no_connection');
     }
 
-    // Photo migration and data-table push are restricted to premium/business.
-    if (await _hasSyncPlan()) {
+    // Photo migration for premium/business runs before the connection to
+    // ensure the remote DB receives relative paths. For org-covered free users
+    // it runs after the connection is established (once coverage is confirmed).
+    final quickPlanCheck = await _hasSyncPlan();
+    if (quickPlanCheck) {
       // Migrate old absolute photo paths → relative, then upload to FTP.
       // Must run before the PostgreSQL upserts so the remote DB receives
       // platform-neutral relative paths.
@@ -702,6 +705,18 @@ class RemoteSyncService {
       await _ensureSchema(conn);
       _schemaReady = true;
 
+      // Determine whether full data-table sync is allowed for this user.
+      // Org-covered free-plan users receive business-level sync privileges.
+      final canFullSync =
+          quickPlanCheck || await _isOrgLicenseCoveredInCloud(conn, userId);
+
+      // For org-covered free users, photo migration was deferred until now
+      // because the connection was needed to confirm coverage. Still runs
+      // before any upserts so relative paths reach the remote DB.
+      if (canFullSync && !quickPlanCheck) {
+        await _migrateAndUploadPhotos(userId);
+      }
+
       // User row — always synced for all plans.
       final userRow = await DatabaseService.getRawUserRow(userId);
       if (userRow != null) await _upsertUser(conn, userRow);
@@ -710,7 +725,7 @@ class RemoteSyncService {
       var reminderCount = 0;
       var interactionCount = 0;
 
-      if (await _hasSyncPlan()) {
+      if (canFullSync) {
         // Contacts
         final contacts = await DatabaseService.getRawContactRows(userId);
         for (final row in contacts) {
@@ -961,12 +976,19 @@ class RemoteSyncService {
         }
       }
 
-      // Data-table pull is restricted to premium / business plans.
+      // Data-table pull is restricted to premium / business plans,
+      // unless the user is covered by a valid organisation licence.
       if (!(await _hasSyncPlan())) {
-        final now = DateTime.now().toIso8601String();
-        await DatabaseService.updateUserLastSync(userId, now);
-        return const SyncResult(success: true);
+        final orgCovered = await _isOrgLicenseCoveredInCloud(conn, userId);
+        if (!orgCovered) {
+          final now = DateTime.now().toIso8601String();
+          await DatabaseService.updateUserLastSync(userId, now);
+          return const SyncResult(success: true);
+        }
+        // Org licence grants full-sync privileges — fall through.
       }
+      // Reached here: either premium/business plan or org-licence covered.
+      const canFullSync = true;
 
       // ── Org membership & permissions ────────────────────────────────────
       final orgId = await _remoteOrgIdForUser(conn, userId);
@@ -1094,7 +1116,7 @@ class RemoteSyncService {
       }
 
       // ── Payment history ───────────────────────────────────────────────────
-      if (await _hasSyncPlan()) {
+      if (canFullSync) {
         final payRes = await conn.execute(
           Sql.named('SELECT * FROM "payment_history" WHERE "user_id" = @uid'),
           parameters: {'uid': userId},
@@ -1531,6 +1553,54 @@ class RemoteSyncService {
     final val = result.first.toColumnMap()['organization_id'];
     if (val == null || val.toString().isEmpty) return null;
     return val.toString();
+  }
+
+  /// Returns true when [userId] belongs to an organisation whose Business-plan
+  /// licence is still active and not yet expired — regardless of the user's
+  /// individual plan or their membership status within the org (suspended
+  /// members remain covered by the org licence).
+  /// Free-plan users covered by a valid org licence receive full data-table
+  /// sync privileges equivalent to the 'business' plan.
+  /// All errors are swallowed and return false so they never block a sync.
+  static Future<bool> _isOrgLicenseCoveredInCloud(
+      Connection conn, String userId) async {
+    try {
+      final orgId = await _remoteOrgIdForUser(conn, userId);
+      if (orgId == null) return false;
+
+      // Confirm the user has a membership row in this org (any status —
+      // suspended members remain covered by the org licence).
+      final memResult = await conn.execute(
+        Sql.named(
+          'SELECT "id" FROM "organization_members" '
+          'WHERE "organization_id" = @orgId AND "user_id" = @userId',
+        ),
+        parameters: {'orgId': orgId, 'userId': userId},
+      );
+      if (memResult.isEmpty) return false;
+
+      final orgResult = await conn.execute(
+        Sql.named(
+          'SELECT "org_status", "org_plan_expires_at" '
+          'FROM "organizations" WHERE "id" = @id',
+        ),
+        parameters: {'id': orgId},
+      );
+      if (orgResult.isEmpty) return false;
+      final orgRow = orgResult.first.toColumnMap();
+
+      if (orgRow['org_status']?.toString() != 'active') return false;
+
+      final expiresStr = orgRow['org_plan_expires_at']?.toString();
+      if (expiresStr == null || expiresStr.isEmpty) return false;
+      final expiresAt = DateTime.tryParse(expiresStr);
+      if (expiresAt == null) return false;
+
+      return DateTime.now().isBefore(expiresAt);
+    } catch (e) {
+      debugPrint('RemoteSyncService._isOrgLicenseCoveredInCloud: $e');
+      return false;
+    }
   }
 
   // SMALLINT columns come back as int from postgres; ensure they are
