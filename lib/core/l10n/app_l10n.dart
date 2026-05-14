@@ -620,6 +620,7 @@ class AppL10n {
   String get last3Months => _en ? 'Last 3 months' : '3 derniers mois';
   String get last6Months => _en ? 'Last 6 months' : '6 derniers mois';
   String get thisYear => _en ? 'This year' : 'Cette année';
+  String get olderThanYear => _en ? 'Others' : 'Autres';
   String get noPayments =>
       _en ? 'No payments yet' : 'Aucun paiement pour le moment';
   String get noPaymentsDesc => _en
