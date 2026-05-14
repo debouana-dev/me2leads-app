@@ -447,7 +447,7 @@ class _PricingScreenState extends ConsumerState<PricingScreen>
                               name: l10n.premiumPlanName,
                               price: l10n.premiumPrice(currency,
                                   eurToTargetRate: eurToUsd),
-                              period: l10n.premiumPeriod(l10n),
+                              period: l10n.premiumYearPeriod(l10n),
                               highlight: true,
                               isSelected: _selectedPlan == 'premium' ||
                                   (plan == 'premium' && _selectedPlan == null),
@@ -459,7 +459,7 @@ class _PricingScreenState extends ConsumerState<PricingScreen>
                               name: l10n.businessPlanName,
                               price: l10n.businessPrice(currency,
                                   eurToTargetRate: eurToUsd),
-                              period: l10n.businessPeriod(l10n),
+                              period: l10n.businessYearPeriod(l10n),
                               highlight: false,
                               isSelected: _selectedPlan == 'business' ||
                                   (plan == 'business' && _selectedPlan == null),
