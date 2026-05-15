@@ -35,33 +35,18 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   void initState() {
     super.initState();
     final d = widget.ocrData;
-    final hasOcr = d.isNotEmpty;
-    _firstNameCtrl =
-        TextEditingController(text: d['firstName'] ?? (hasOcr ? '' : 'Karen'));
-    _lastNameCtrl =
-        TextEditingController(text: d['lastName'] ?? (hasOcr ? '' : 'Ambassa'));
-    _jobTitleCtrl =
-        TextEditingController(text: d['jobTitle'] ?? (hasOcr ? '' : 'CEO'));
-    _companyCtrl = TextEditingController(
-        text: d['company'] ?? (hasOcr ? '' : 'GreenTech Cameroon'));
-    _phoneCtrl = TextEditingController(
-        text: d['phone'] ?? (hasOcr ? '' : '+237 6 99 88 77 66'));
-    _emailCtrl = TextEditingController(
-        text: d['email'] ?? (hasOcr ? '' : 'karen@greentech.cm'));
-    _sourceCtrl = TextEditingController(
-        text: d['source'] ?? (hasOcr ? '' : 'Salon Luxembourg 2026'));
-    _project1Ctrl = TextEditingController(
-        text: d['project1'] ?? (hasOcr ? '' : 'Partenariat Tech'));
-    _project1BudgetCtrl = TextEditingController(
-        text: d['project1Budget'] ?? (hasOcr ? '' : '15 000 €'));
+    _firstNameCtrl = TextEditingController(text: d['firstName'] ?? '');
+    _lastNameCtrl = TextEditingController(text: d['lastName'] ?? '');
+    _jobTitleCtrl = TextEditingController(text: d['jobTitle'] ?? '');
+    _companyCtrl = TextEditingController(text: d['company'] ?? '');
+    _phoneCtrl = TextEditingController(text: d['phone'] ?? '');
+    _emailCtrl = TextEditingController(text: d['email'] ?? '');
+    _sourceCtrl = TextEditingController(text: d['source'] ?? '');
+    _project1Ctrl = TextEditingController(text: d['project1'] ?? '');
+    _project1BudgetCtrl = TextEditingController(text: d['project1Budget'] ?? '');
     _project2Ctrl = TextEditingController(text: d['project2'] ?? '');
-    _project2BudgetCtrl =
-        TextEditingController(text: d['project2Budget'] ?? '');
-    _notesCtrl = TextEditingController(
-        text: d['notes'] ??
-            (hasOcr
-                ? ''
-                : 'Rencontrée au salon Luxembourg. Intéressée par un partenariat.'));
+    _project2BudgetCtrl = TextEditingController(text: d['project2Budget'] ?? '');
+    _notesCtrl = TextEditingController(text: d['notes'] ?? '');
     _photoPath = d['photoPath'];
 
     // Pre-select tags found by OCR (comma-separated).
