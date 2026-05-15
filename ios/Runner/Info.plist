@@ -18,7 +18,7 @@
             <key>CFBundleURLSchemes</key>
             <array>
                 <!-- Copiez REVERSED_CLIENT_ID depuis GoogleService-Info.plist -->
-                <string>com.googleusercontent.apps.772969451694-765ju5be261tatu47gmeuihktrsu3uut</string>
+                <string>com.googleusercontent.apps.772969451694-thhinvi6buauusle546su8irssfdb6t3</string>
             </array>
         </dict>
     </array>
