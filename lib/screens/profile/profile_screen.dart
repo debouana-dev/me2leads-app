@@ -104,6 +104,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     return Scaffold(
       backgroundColor: AppColors.bg(context),
       body: SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: 88 + MediaQuery.of(context).padding.bottom + 5),
         child: Column(
           children: [
             // Header
