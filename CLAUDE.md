@@ -27,8 +27,8 @@ conventions.
    (SQLite `_onCreate` / `_onUpgrade`) or in `lib/services/remote_sync_service.dart`
    (`_ensureSchema` / `_upsertXxx`) — the file `docs/schema.sql` **must** be
    updated in the same task to reflect those changes. The exported SQL script must
-   remain MySQL 8.0+ compatible and consistent with `_ensureSchema` (same column
-   types: `VARCHAR(50)` for datetimes, `TEXT` for arrays, `TINYINT(1)` for
+   remain PostgreSQL 14+ compatible and consistent with `_ensureSchema` (same column
+   types: `VARCHAR(50)` for datetimes, `TEXT` for arrays, `SMALLINT` for
    booleans). Also add the corresponding `ALTER TABLE … ADD COLUMN IF NOT EXISTS`
    block to the **UPGRADE SCRIPT** section of `docs/schema.sql` for any new column.
 
@@ -44,7 +44,7 @@ conventions.
   `AppStrings.sloganEn`).
 - **Stack:** Flutter 3.24.5, Dart SDK `^3.5.0`, Riverpod 2.5 for state, GoRouter
   14 for navigation, SQLite (sqflite + sqflite_common_ffi) for local storage,
-  MySQL (`mysql_client`) for remote sync, FTP (`ftpconnect`) for photo storage,
+  PostgreSQL (`postgres`) for remote sync, FTP (`ftpconnect`) for photo storage,
   AES-256-CBC encryption of PII via `encrypt` + `flutter_secure_storage`,
   push notifications via `flutter_local_notifications` + `workmanager`.
 - **Pricing tiers:** Free (10 contacts), Premium `2.99 €/mois`, Business
@@ -78,7 +78,7 @@ myleads-app/
     ├── test/
     │   └── org_sync_test.dart        ← integration tests: org lifecycle, member management, contact dedup, permissions
     ├── config/
-    │   └── app_config.dart           ← XOR-obfuscated credentials (SMTP/MySQL/FTP) + feature flags
+    │   └── app_config.dart           ← XOR-obfuscated credentials (SMTP/PostgreSQL/FTP) + feature flags
     ├── core/
     │   ├── constants/app_strings.dart
     │   ├── router/app_router.dart    ← GoRouter config, named routes below
@@ -134,7 +134,7 @@ myleads-app/
     │   ├── ocr_service_mobile.dart   ← ML Kit text recognition
     │   ├── ocr_service_stub.dart     ← web / unsupported platforms
     │   ├── photo_storage_service.dart ← contact / user photo files (local)
-    │   ├── remote_sync_service.dart  ← MySQL bidirectional sync + live-write callbacks + cloud user lookup
+    │   ├── remote_sync_service.dart  ← PostgreSQL bidirectional sync + live-write callbacks + cloud user lookup
     │   ├── storage_service.dart      ← facade, init order for DB + crypto + sync wiring
     │   └── web_db_factory_{stub,web}.dart ← conditional import for sqflite web
     └── widgets/
@@ -321,7 +321,7 @@ explicit null for nullable fields.
 | `notificationsProvider`    | In-app notification feed (unread count, mark-read, delete)                                       |
 | `settingsProvider`         | Locale (`_en` toggle) + theme preferences                                                        |
 | `currencyProvider`         | Real-time currency conversion (for multi-currency pricing display)                               |
-| `organizationProvider`     | Full org CRUD + member management; `OrgState` exposes `currentUserCanViewHistory`, `uniqueContactCount`; derived: `orgCanCreateProvider`, `orgCanEditOthersProvider`, `orgCanViewRemindersProvider`, `orgCanViewHistoryProvider` |
+| `organizationProvider`     | Full org CRUD + member management; `OrgState` exposes `currentUserCanViewHistory`, `currentUserCanExportContacts`, `uniqueContactCount`; derived: `orgCanCreateProvider`, `orgCanEditOthersProvider`, `orgCanViewRemindersProvider`, `orgCanViewHistoryProvider`, `orgCanExportContactsProvider` |
 
 ### Cross-screen navigation patterns
 
@@ -374,7 +374,7 @@ photo_path, session_token, created_at, plan, last_sync_at
 - Password hashed with a salt via `crypto.sha256`.
 - `session_token` rotated on logout / password change (pseudo "sign out
   everywhere").
-- `last_sync_at` updated on every successful MySQL push; displayed on `SyncScreen`.
+- `last_sync_at` updated on every successful PostgreSQL push; displayed on `SyncScreen`.
 
 ### Interaction
 ```
@@ -390,10 +390,11 @@ id, name, owner_id, invite_code (8-char alphanumeric), created_at
 ```
 id, org_id, user_id, role (admin|member), status (active|suspended),
 can_edit BOOL, can_create BOOL, can_view_reminders BOOL,
-can_view_history BOOL, joined_at
+can_view_history BOOL, can_export_contacts BOOL, joined_at
 ```
-- Admin always has all four privileges set to true.
+- Admin always has all five privileges set to true.
 - `can_view_history` — may see interaction history authored by other org members (v12).
+- `can_export_contacts` — may export shared org contacts to CSV/JSON (v20).
 - `suspendMember` freezes member access without removing them.
 - `removeMember` transfers only **non-duplicate** contacts to the org admin (contacts whose phone/email already exist in the admin's set are left with the removed member to avoid data loss).
 
@@ -415,6 +416,7 @@ Schema version history (additive only — see `_onUpgrade` in `database_service.
 | 10 | `organization_members.can_view_reminders` privilege column |
 | 11 | `users.last_sync_at` timestamp column |
 | 12 | `organization_members.can_view_history` privilege column |
+| 20 | `organization_members.can_export_contacts` privilege column |
 
 **Bump `_dbVersion` and add an `if (oldVersion < N)` block** when changing
 the schema; never rewrite existing tables.
@@ -423,16 +425,16 @@ the schema; never rewrite existing tables.
 
 ## 7. Remote sync & photo storage
 
-### 7.1 MySQL bidirectional sync (`remote_sync_service.dart`)
+### 7.1 PostgreSQL bidirectional sync (`remote_sync_service.dart`)
 
-- **Target:** MySQL server at `AppConfig.mysqlHost:35500`, database `me2leads`.
+- **Target:** PostgreSQL server at `AppConfig.pgHost:5432`, database `me2leads`.
 - **Credentials:** XOR-obfuscated in `app_config.dart`, decrypted at runtime via
   `_deobfuscate()`. Never appear as plaintext string literals in source.
 - **Plan-gated sync:**
   - **Free** — syncs user row only (no contacts / reminders / interactions).
   - **Premium / Business** — full bidirectional data sync.
   - Gate is enforced in both push and pull via the `_hasSyncPlan` getter.
-- **Push:** Uploads local rows to MySQL. Data tables (contacts, reminders,
+- **Push:** Uploads local rows to PostgreSQL. Data tables (contacts, reminders,
   interactions, org data) require Premium/Business. User row is always pushed.
   Absolute photo paths are migrated to relative before upsert (`_migrateAndUploadPhotos`).
 - **Pull:** Downloads remote rows, applies upsert to local SQLite. **Session
@@ -446,8 +448,8 @@ the schema; never rewrite existing tables.
   periodic task (every 15 min) that runs `push()` + `pull()` for Business-plan
   users. Cancelled via `cancelBusinessSync()` on logout or plan downgrade.
 - **Live-write mode:** Every local write (insert/update/delete via `DatabaseService`)
-  spawns a fire-and-forget background MySQL upsert. Network errors are swallowed
-  so they never block the UI.
+  spawns a fire-and-forget background PostgreSQL upsert (`ON CONFLICT … DO UPDATE`).
+  Network errors are swallowed so they never block the UI.
 - **Cloud user lookup helpers:** `isEmailTakenInCloud()`, `registerUserInCloud()`,
   `importUserByEmailLookup()`, `deleteUserFromCloud()`,
   `findCloudUserIdByEmailLookup()` — used by `AuthNotifier` for multi-device
@@ -487,11 +489,13 @@ Organizations are wired throughout contacts, reminders, and the profile tab.
   - `can_edit` — may edit any org contact
   - `can_view_reminders` — may see reminders on shared contacts
   - `can_view_history` — may see interaction history authored by other members (v12)
+  - `can_export_contacts` — may export shared org contacts to CSV/JSON (v20)
 - **Derived providers (read in UI):**
   - `orgCanCreateProvider` — current user may create contacts
   - `orgCanEditOthersProvider` — current user may edit other members' contacts
   - `orgCanViewRemindersProvider` — current user may view shared reminders
   - `orgCanViewHistoryProvider` — current user may view history entries authored by others
+  - `orgCanExportContactsProvider` — current user may export org contacts
 - **Contact history gating:** `ContactHistoryScreen` watches `orgCanViewHistoryProvider`
   and filters to show only entries authored by the current user when the privilege is false.
 - **Contact transfer:** removing or suspending a member transfers only **non-duplicate**
@@ -551,8 +555,8 @@ Organizations are wired throughout contacts, reminders, and the profile tab.
 13. **No build-runner output committed.** If you add `@riverpod` annotations,
     run `flutter pub run build_runner build` locally; CI will regenerate.
 14. **Remote sync live-write.** `RemoteSyncService` registers callbacks on
-    `DatabaseService` so every write also fires a background MySQL upsert.
-    Do not call MySQL directly from providers or screens — go through
+    `DatabaseService` so every write also fires a background PostgreSQL upsert.
+    Do not call PostgreSQL directly from providers or screens — go through
     `DatabaseService` and let the callbacks propagate.
 15. **Photo paths are always relative.** Store `contact_pictures/<userId>/<file>`
     in `photo_path`, never an absolute device path. `PhotoStorageService`
@@ -560,8 +564,10 @@ Organizations are wired throughout contacts, reminders, and the profile tab.
 16. **Organization privilege checks.** Any screen that mutates org contacts must
     read `orgCanCreateProvider` / `orgCanEditOthersProvider` before allowing the
     action. Any screen that displays other members' interaction history must check
-    `orgCanViewHistoryProvider`. Non-admin members may be restricted on all four
-    privilege axes (`can_create`, `can_edit`, `can_view_reminders`, `can_view_history`).
+    `orgCanViewHistoryProvider`. Any screen that allows exporting org contacts must
+    check `orgCanExportContactsProvider`. Non-admin members may be restricted on all
+    five privilege axes (`can_create`, `can_edit`, `can_view_reminders`,
+    `can_view_history`, `can_export_contacts`).
 
 ---
 
@@ -598,7 +604,7 @@ patch step in the workflow, not via committed files. Files under
 | Release a new APK                      | push to `main`; CI handles build + GitHub Release + Pages        |
 | Watch a CI run                         | `gh run list --limit 3` then `gh run watch <id> --exit-status`   |
 | Trigger a manual sync                  | `SyncScreen` (`/sync`) — push/pull buttons call `RemoteSyncService` |
-| Add org-gated UI                       | read `orgCanCreateProvider` / `orgCanEditOthersProvider` before allowing mutations; read `orgCanViewHistoryProvider` before showing other members' interaction history |
+| Add org-gated UI                       | read `orgCanCreateProvider` / `orgCanEditOthersProvider` before allowing mutations; read `orgCanViewHistoryProvider` before showing other members' interaction history; read `orgCanExportContactsProvider` before allowing export |
 | Test org/sync behavior                 | `test/org_sync_test.dart` — 47 cases covering org lifecycle, member privileges, contact deduplication, live-write callbacks |
 
 ---
@@ -634,7 +640,7 @@ patch step in the workflow, not via committed files. Files under
 - **SQLite web:** `sqflite_common_ffi_web` needs the WASM blob copied to
   `web/` via `dart run sqflite_common_ffi_web:setup` before
   `flutter build web`. The CI already does this.
-- **Remote sync credentials:** MySQL + FTP credentials are XOR-obfuscated in
+- **Remote sync credentials:** PostgreSQL + FTP credentials are XOR-obfuscated in
   `app_config.dart`. Never add them as plaintext literals. The obfuscation key
   is `MyLeads2026SecretKey` (cycling XOR). Runtime memory could still expose
   them on a compromised device — this is acceptable for the current threat model.
@@ -646,7 +652,7 @@ patch step in the workflow, not via committed files. Files under
   for new user IDs.
 - **Organization contact transfer.** Calling `removeMember` or `suspendMember`
   triggers a contact-ownership transfer to the org admin in both SQLite and
-  MySQL before the membership change is committed. Only non-duplicate contacts
+  PostgreSQL before the membership change is committed. Only non-duplicate contacts
   transfer (deduplication by `phone_lookup` / `email_lookup`). Do not remove
   members directly via raw DB calls.
 - **Plan-gated sync.** Free-plan users push/pull the user row only; contacts,
@@ -693,7 +699,7 @@ Use these as reference points when coordinating changes:
   raw interactions with completed reminders.
 - **v1.0.0 doc v8** — Organizations + team management (admin/member roles,
   invite codes, privilege matrix: `can_edit` / `can_create` / `can_view_reminders`,
-  contact-transfer on member removal/suspension), MySQL bidirectional sync
+  contact-transfer on member removal/suspension), PostgreSQL bidirectional sync
   (`RemoteSyncService` with live-write callbacks + `SyncScreen`), FTP photo
   storage (`FtpPhotoService`, relative path convention), push notifications
   via `flutter_local_notifications` + `workmanager` background tasks,
@@ -718,6 +724,11 @@ Use these as reference points when coordinating changes:
   for deduplicated org stats, payment methods updated (Amazon Pay added;
   Mobile Money + Virement removed), SQLite schema bumped to **v12**,
   integration test suite added (`test/org_sync_test.dart`, 47 cases).
+- **v1.0.0 doc v10** — Cloud database migrated from MySQL (port 35500) to
+  PostgreSQL (port 5432, `postgres ^3.3.0`; `ON CONFLICT … DO UPDATE` upserts,
+  `NUMERIC`/`SMALLINT` column types); `can_export_contacts` fifth privilege on
+  `OrgMember` + `orgCanExportContactsProvider` derived provider, SQLite schema
+  bumped to **v20** (`organization_members.can_export_contacts`).
 
 When the user references "doc vN", match the behavior to the nearest anchor
 above and consult the corresponding commit (see `git log --oneline`).

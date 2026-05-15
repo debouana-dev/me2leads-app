@@ -158,7 +158,7 @@ class ContactsScreen extends ConsumerWidget {
                     onRefresh: () =>
                         ref.read(contactsProvider.notifier).reload(),
                     child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+                      padding: EdgeInsets.fromLTRB(24, 0, 24, 88 + MediaQuery.of(context).padding.bottom + 5),
                       itemCount: contacts.length,
                       itemBuilder: (context, index) {
                         return _buildContactItem(context, contacts[index]);
