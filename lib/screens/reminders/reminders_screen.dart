@@ -171,7 +171,7 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
                   : RefreshIndicator(
                       onRefresh: () => ref.read(remindersProvider.notifier).refresh(),
                       child: ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                        padding: EdgeInsets.fromLTRB(20, 0, 20, 88 + MediaQuery.of(context).padding.bottom + 5),
                         itemCount: current.length,
                         itemBuilder: (_, i) => _ReminderCard(reminder: current[i]),
                       ),
