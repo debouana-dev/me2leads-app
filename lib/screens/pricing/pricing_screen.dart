@@ -159,7 +159,6 @@ class _PricingScreenState extends ConsumerState<PricingScreen>
       _showSnack('Stripe not configured', AppColors.warning);
       return;
     }
-
     setState(() {
       _selectedPlan = planId;
       _loadingPlan = planId;
