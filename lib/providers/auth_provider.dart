@@ -21,6 +21,7 @@ import '../services/ftp_photo_service.dart';
 import '../services/photo_storage_service.dart';
 import '../services/background_task.dart';
 import '../services/remote_sync_service.dart';
+import '../services/revenue_cat_service.dart';
 import '../services/storage_service.dart';
 
 const _uuid = Uuid();
@@ -259,6 +260,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
     await StorageService.setCurrentSession(updated, token);
     await EncryptionService.initFromEnv(updated.email);
+    await RevenueCatService.logIn(updated.id);
 
     state = state.copyWith(
       isLoggedIn: true,
@@ -401,6 +403,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     await StorageService.setCurrentSession(user, token);
+    await RevenueCatService.logIn(user.id);
 
     state = state.copyWith(
       isLoggedIn: true,
@@ -588,6 +591,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     await StorageService.setCurrentSession(user, token);
+    await RevenueCatService.logIn(user.id);
     // Encryption already initialized above
     state = state.copyWith(
       isLoggedIn: true,
@@ -668,6 +672,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> logout() async {
     await cancelBusinessSync();
+    await RevenueCatService.logOut();
     await StorageService.clearSession();
     state = const AuthState();
   }

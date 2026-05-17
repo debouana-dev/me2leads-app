@@ -16,6 +16,7 @@ import '../../models/user_account.dart';
 import '../../providers/organization_provider.dart';
 import '../../services/database_service.dart';
 import '../../services/photo_storage_service.dart';
+import '../../services/revenue_cat_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/stripe_service.dart';
 import '../../services/subscription_service.dart';
@@ -413,7 +414,7 @@ class _OrganizationAdminScreenState
       return;
     }
 
-    if (!AppConfig.stripePublishableKey.isNotEmpty) {
+    if (Platform.isAndroid && !AppConfig.stripePublishableKey.isNotEmpty) {
       _showSnack('Stripe not configured', error: true);
       return;
     }
@@ -426,18 +427,37 @@ class _OrganizationAdminScreenState
     );
 
     setState(() {});
-    final result = await StripeService.startCheckout(
-      plan: 'business',
-      billingCycle: billingCycle!,
-      userEmail: user.email,
-      licenseCount: licenseCount,
-      amount: amountToPayCents.toDouble(),
-    );
+    
+    bool success = false;
+    String? transactionId;
+    String? errorCode;
+
+    if (Platform.isIOS) {
+      // Use RevenueCat on iOS. Note: Dynamic license pricing usually requires 
+      // specific setup in RevenueCat (e.g. multi-seat offerings).
+      // Here we fall back to the standard business plan purchase.
+      final rcResult = await RevenueCatService.purchasePlan('business', billingCycle!);
+      success = rcResult.success;
+      transactionId = rcResult.customerId;
+      errorCode = rcResult.errorCode;
+    } else {
+      // Use Stripe on Android.
+      final result = await StripeService.startCheckout(
+        plan: 'business',
+        billingCycle: billingCycle!,
+        userEmail: user.email,
+        licenseCount: licenseCount,
+        amount: amountToPayCents.toDouble(),
+      );
+      success = result.success;
+      transactionId = result.paymentIntentId;
+      errorCode = result.errorCode;
+    }
 
     if (!mounted) return;
 
-    if (!result.success) {
-      final msg = result.errorCode == 'cancelled'
+    if (!success) {
+      final msg = errorCode == 'cancelled'
           ? l10n.paymentCancelled
           : l10n.paymentFailed;
       _showSnack(msg, error: true);
@@ -446,8 +466,8 @@ class _OrganizationAdminScreenState
 
     // Record payment for the org license pool, including the admin seat.
     final record = PaymentRecord(
-      id: result.paymentIntentId?.isNotEmpty == true
-          ? result.paymentIntentId!
+      id: transactionId?.isNotEmpty == true
+          ? transactionId!
           : _renewalUuid.v4(),
       transactionId: PaymentRecord.generateId(),
       userId: user.id,
@@ -456,7 +476,7 @@ class _OrganizationAdminScreenState
       amount: amountToPayCents / 100,
       currency: 'EUR',
       status: 'succeeded',
-      stripePaymentIntentId: result.paymentIntentId ?? '',
+      stripePaymentIntentId: (Platform.isAndroid ? transactionId : null) ?? '',
       accountType: 'organization',
       createdAt: DateTime.now().toIso8601String(),
     );
